@@ -1,26 +1,25 @@
 # UnityRunBridge
 
-UnityRunBridge provides a small Editor-only Unity package and a Python CLI for
-controlling a local Unity Editor instance from scripts or agents.
+UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CLI，用于通过脚本或 Agent 控制本地 Unity Editor 实例。
 
-Current scope:
+当前功能范围：
 
-- Start a Unity Editor process.
-- Query Editor status through a local HTTP bridge.
-- Enter, stop, pause, and resume Play Mode.
-- Open a scene inside the Unity project.
+- 启动 Unity Editor 进程。
+- 通过本地 HTTP 桥接查询 Editor 状态。
+- 进入、停止、暂停和恢复 Play Mode。
+- 打开 Unity 项目中的场景。
 
-The bridge listens on `http://127.0.0.1:17890` inside the Unity Editor.
+桥接服务在 Unity Editor 内监听 `http://127.0.0.1:17890`。
 
-## Requirements
+## 环境要求
 
-- Unity Editor `2022.3` or newer.
-- Python `3.11` or newer.
-- `uv` for Python dependency and command execution.
+- Unity Editor `2022.3` 或更高版本。
+- Python `3.11` 或更高版本。
+- `uv` 用于 Python 依赖管理和命令执行。
 
-## Add the Unity Package
+## 添加 Unity 包
 
-Add the package to the Unity project's `Packages/manifest.json`:
+将包添加到 Unity 项目的 `Packages/manifest.json` 中：
 
 ```json
 {
@@ -30,44 +29,38 @@ Add the package to the Unity project's `Packages/manifest.json`:
 }
 ```
 
-Use the absolute path of this repository on your machine. The package is
-Editor-only and starts the local bridge when the Unity Editor loads it.
+请使用本仓库在你机器上的绝对路径。该包仅在 Editor 下运行，并在 Unity Editor 加载时启动本地桥接服务。
 
-## Install the CLI
+## 安装 CLI
 
-From this repository:
+在本仓库中执行：
 
 ```bash
 cd src/unityctl
 uv sync
 ```
 
-Run commands with `uv run unityctl ...`.
+使用 `uv run unityctl ...` 运行命令。
 
-## Configure Local Paths
+## 配置本地路径
 
-`UNITY_BIN` and `UNITY_PROJECT` are not hardcoded project settings. They are
-regular shell variables used by the examples below so each machine can provide
-its own Unity installation and Unity project.
+`UNITY_BIN` 和 `UNITY_PROJECT` 并非硬编码的项目设置，它们是以下示例中用到的普通 shell 变量，以便每台机器可以指定自己的 Unity 安装路径和 Unity 项目路径。
 
-`UNITY_BIN` should point to the Unity command-line executable:
+`UNITY_BIN` 应指向 Unity 命令行可执行文件：
 
 ```bash
 export UNITY_BIN="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
 ```
 
-If you start from a `.app` path such as
-`/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app`, append
-`/Contents/MacOS/Unity`.
+如果你从 `.app` 路径（如 `/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app`）开始，请在末尾追加 `/Contents/MacOS/Unity`。
 
-`UNITY_PROJECT` should point to the Unity project root, the directory that
-contains `Assets`, `Packages`, and `ProjectSettings`:
+`UNITY_PROJECT` 应指向 Unity 项目根目录，即包含 `Assets`、`Packages` 和 `ProjectSettings` 的目录：
 
 ```bash
 export UNITY_PROJECT="/absolute/path/to/your/unity-project"
 ```
 
-For repeatable local runs, keep logs under this repository:
+为便于重复本地运行，请将日志保存在本仓库下：
 
 ```bash
 cd /absolute/path/to/UnityRunBridge
@@ -75,9 +68,9 @@ export REPO_ROOT="$(pwd)"
 mkdir -p "$REPO_ROOT/.tmp/logs"
 ```
 
-## Start Unity
+## 启动 Unity
 
-From `src/unityctl`:
+在 `src/unityctl` 目录下执行：
 
 ```bash
 cd "$REPO_ROOT/src/unityctl"
@@ -87,15 +80,15 @@ uv run unityctl start-editor \
   --log-file "$REPO_ROOT/.tmp/logs/unity-editor.log"
 ```
 
-Wait until the Unity log contains:
+等待 Unity 日志中出现：
 
 ```text
 Unity Agent Bridge listening on http://127.0.0.1:17890/
 ```
 
-## Control the Editor
+## 控制 Editor
 
-From `src/unityctl`:
+在 `src/unityctl` 目录下执行：
 
 ```bash
 uv run unityctl status
@@ -106,18 +99,18 @@ uv run unityctl stop
 uv run unityctl open-scene "Assets/Scenes/Login.unity"
 ```
 
-All commands print JSON. A successful response includes `"ok": true`.
+所有命令均输出 JSON。成功响应中包含 `"ok": true`。
 
-## Run Tests
+## 运行测试
 
-Python tests:
+Python 测试：
 
 ```bash
 cd src/unityctl
 uv run pytest tests -v
 ```
 
-Unity EditMode tests, from the repository root:
+Unity EditMode 测试，在仓库根目录下执行：
 
 ```bash
 cd "$REPO_ROOT"
@@ -132,5 +125,4 @@ mkdir -p "$REPO_ROOT/.tmp/logs" "$REPO_ROOT/.tmp/test-results"
   -logFile "$REPO_ROOT/.tmp/logs/editmode.log"
 ```
 
-The Unity test command intentionally does not pass `-quit`; Unity exits after
-the test run writes the result XML.
+Unity 测试命令**故意不传** `-quit` 参数；Unity 在测试运行写入结果 XML 后会自动退出。
