@@ -6,7 +6,7 @@
 
 **架构：** Unity 项目通过一个 Editor-only UPM package 接入 Bridge。Bridge 在 Unity Editor 内启动本地 HTTP 服务，外部 Python CLI `unityctl` 负责启动 Editor 进程，并通过 HTTP 调用 Bridge 控制 PlayMode。由于 `HttpListener` 回调不在 Unity 主线程执行，所有 Unity Editor API 调用都必须通过主线程队列转发。
 
-**技术栈：** Unity Editor C# UPM package、`System.Net.HttpListener`、Unity `EditorApplication`、Unity `EditorSceneManager`、Python 3.11+、`argparse`、`urllib.request`、`pytest`。
+**技术栈：** Unity Editor C# UPM package、`System.Net.HttpListener`、Unity `EditorApplication`、Unity `EditorSceneManager`、Python 3.11+、`uv`、`argparse`、`urllib.request`、`pytest`。
 
 ---
 
@@ -60,6 +60,8 @@
   测试 scene path 校验。
 - `src/unityctl/pyproject.toml`  
   Python CLI package metadata。
+- `src/unityctl/uv.lock`
+  `uv sync` 生成的 Python dependency lockfile。
 - `src/unityctl/unityctl/__init__.py`  
   Python package marker。
 - `src/unityctl/unityctl/client.py`  
@@ -81,6 +83,7 @@
 
 **Files:**
 - Create: `src/unityctl/pyproject.toml`
+- Create: `src/unityctl/uv.lock`
 - Create: `src/unityctl/unityctl/__init__.py`
 - Create: `src/unityctl/unityctl/client.py`
 - Create: `src/unityctl/tests/test_client.py`
@@ -187,10 +190,7 @@ Run:
 
 ```bash
 cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-python3 -m venv .venv
-. .venv/bin/activate
-pip install pytest
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_client.py -v
+uvx pytest src/unityctl/tests/test_client.py -v
 ```
 
 预期：测试失败，错误包含 `ModuleNotFoundError: No module named 'unityctl'`。
@@ -213,6 +213,11 @@ dependencies = []
 
 [project.scripts]
 unityctl = "unityctl.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -293,19 +298,20 @@ class BridgeClient:
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_client.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_client.py -v
 ```
 
 预期：`4 passed`。
+
+说明：`uv run` 会根据 `pyproject.toml` 同步本地环境，并生成应提交的 `src/unityctl/uv.lock`。
 
 - [ ] **Step 7: 提交**
 
 Run:
 
 ```bash
-git add src/unityctl/pyproject.toml src/unityctl/unityctl/__init__.py src/unityctl/unityctl/client.py src/unityctl/tests/test_client.py
+git add src/unityctl/pyproject.toml src/unityctl/uv.lock src/unityctl/unityctl/__init__.py src/unityctl/unityctl/client.py src/unityctl/tests/test_client.py
 git commit -m "feat: add unity bridge http client"
 ```
 
@@ -366,9 +372,8 @@ def test_validate_project_path_rejects_non_unity_project(tmp_path):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_editor.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_editor.py -v
 ```
 
 预期：测试失败，错误包含 `ModuleNotFoundError: No module named 'unityctl.editor'`。
@@ -426,9 +431,8 @@ def start_editor(
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_editor.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_editor.py -v
 ```
 
 预期：`3 passed`。
@@ -530,9 +534,8 @@ def test_open_scene_command_sends_path(monkeypatch):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_cli.py -v
 ```
 
 预期：测试失败，原因是 `unityctl.cli` 不存在。
@@ -631,9 +634,8 @@ if __name__ == "__main__":
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_cli.py -v
 ```
 
 预期：`3 passed`。
@@ -643,9 +645,8 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：`10 passed`。
@@ -1435,27 +1436,25 @@ http://127.0.0.1:17890
 ## 安装开发版 CLI
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e src/unityctl
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv sync
 ```
 
 ## CLI 示例
 
 ```bash
-unityctl status
-unityctl play
-unityctl pause
-unityctl resume
-unityctl stop
-unityctl open-scene Assets/Scenes/Login.unity
+uv run unityctl status
+uv run unityctl play
+uv run unityctl pause
+uv run unityctl resume
+uv run unityctl stop
+uv run unityctl open-scene Assets/Scenes/Login.unity
 ```
 
 启动一个 Unity Editor 进程：
 
 ```bash
-unityctl start-editor \
+uv run unityctl start-editor \
   --unity "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity" \
   --project "/path/to/unity/project"
 ```
@@ -1488,9 +1487,8 @@ unityctl start-editor \
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：`10 passed`。
@@ -1500,14 +1498,13 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
 在 Unity project 已打开、且 Bridge package 已安装的前提下运行：
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-pip install -e src/unityctl
-unityctl status
-unityctl play
-unityctl pause
-unityctl resume
-unityctl stop
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv sync
+uv run unityctl status
+uv run unityctl play
+uv run unityctl pause
+uv run unityctl resume
+uv run unityctl stop
 ```
 
 预期：

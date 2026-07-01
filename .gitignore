@@ -43,6 +43,8 @@ Desktop.ini
 # Generated files
 *.log
 *.lock
+!uv.lock
+!**/uv.lock
 *.pid
 *.seed
 
@@ -55,6 +57,8 @@ Desktop.ini
 *.rej
 
 # Environment files
+.venv/
+**/.venv/
 .env
 .env.local
 .env.*.local

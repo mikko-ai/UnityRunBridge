@@ -6,7 +6,7 @@
 
 **Architecture:** 本入口计划不重复子计划中的代码细节，只作为执行导航。MVP 分两阶段：先实现 `Unity Editor Control`，让外部 agent 能稳定控制单个 Unity Editor；再实现 `Unity Runtime Observability`，让每次 PlayMode 运行产生 session-based 落盘日志与 summary。
 
-**Tech Stack:** Unity Editor C# UPM package、Python `unityctl` CLI、localhost HTTP bridge、JSON/JSONL、pytest、Unity EditMode tests。
+**Tech Stack:** Unity Editor C# UPM package、Python `unityctl` CLI managed by `uv`、localhost HTTP bridge、JSON/JSONL、pytest、Unity EditMode tests。
 
 ---
 
@@ -61,6 +61,7 @@ flowchart TD
 - `Unity Editor Bridge package` 是少量侵入的 Editor-only UPM package，不进入 runtime build。
 - `Local HTTP bridge` 只监听本机地址，第一版固定为 `http://127.0.0.1:17890`。
 - `Session files` 是运行观测的最终事实来源，agent 应优先读取落盘文件进行复盘。
+- Python CLI 使用 `uv` 管理；除非命令显式使用 `--project`，`uv run unityctl ...` 默认在 `src/unityctl` 目录下执行。
 - 第一版只支持单 Unity project、单 Unity Editor instance。
 
 ## Monorepo 完整目录设计
@@ -70,7 +71,6 @@ UnityRunBridge/
   README.md
   LICENSE
   CHANGELOG.md
-  pyproject.toml                    # optional workspace-level Python tooling
   .gitignore
 
   packages/                         # Unity UPM packages
@@ -102,6 +102,7 @@ UnityRunBridge/
   src/
     unityctl/                       # Python CLI, MVP primary entry for agents
       pyproject.toml
+      uv.lock
       unityctl/
         __init__.py
         cli.py
@@ -236,12 +237,13 @@ UPM Git 引用方式：
 完成后应具备：
 
 ```bash
-unityctl status
-unityctl play
-unityctl pause
-unityctl resume
-unityctl stop
-unityctl open-scene Assets/Scenes/Login.unity
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl status
+uv run unityctl play
+uv run unityctl pause
+uv run unityctl resume
+uv run unityctl stop
+uv run unityctl open-scene Assets/Scenes/Login.unity
 ```
 
 完成标准：
@@ -276,19 +278,20 @@ unityctl open-scene Assets/Scenes/Login.unity
 完成后应具备：
 
 ```bash
-unityctl play \
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl play \
   --project "/path/to/unity/project" \
   --session login-flow \
   --scene Assets/Scenes/Login.unity \
   --task "verify login flow"
 
-unityctl stop \
+uv run unityctl stop \
   --project "/path/to/unity/project" \
   --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 
-unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
-unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
-unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
+uv run unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 ```
 
 完成标准：
@@ -337,9 +340,8 @@ sed -n '1,220p' docs/superpowers/plans/2026-06-30-unity-editor-control.md
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：全部 Python tests 通过。
@@ -357,11 +359,12 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
 正常打开 Unity project，等待 Bridge 启动后运行：
 
 ```bash
-unityctl status
-unityctl play
-unityctl pause
-unityctl resume
-unityctl stop
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl status
+uv run unityctl play
+uv run unityctl pause
+uv run unityctl resume
+uv run unityctl stop
 ```
 
 预期：每条命令退出码为 `0`，并输出包含 `"ok": true` 的 JSON。
@@ -420,9 +423,8 @@ sed -n '1,220p' docs/superpowers/plans/2026-06-30-unity-runtime-observability.md
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：全部 Python tests 通过。
@@ -440,15 +442,14 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
 正常打开 Unity project，等待 Bridge 启动后运行：
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-pip install -e src/unityctl
-SESSION_OUTPUT="$(unityctl play --project "$UNITY_PROJECT" --session login-flow --scene Assets/Scenes/Login.unity --task "verify login flow")"
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv sync
+SESSION_OUTPUT="$(uv run unityctl play --project "$UNITY_PROJECT" --session login-flow --scene Assets/Scenes/Login.unity --task "verify login flow")"
 SESSION_PATH="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sessionPath"])' <<< "$SESSION_OUTPUT")"
-unityctl stop --project "$UNITY_PROJECT" --session-path "$SESSION_PATH"
-unityctl logs --session-path "$SESSION_PATH" --limit 20
-unityctl errors --session-path "$SESSION_PATH"
-unityctl summary --session-path "$SESSION_PATH"
+uv run unityctl stop --project "$UNITY_PROJECT" --session-path "$SESSION_PATH"
+uv run unityctl logs --session-path "$SESSION_PATH" --limit 20
+uv run unityctl errors --session-path "$SESSION_PATH"
+uv run unityctl summary --session-path "$SESSION_PATH"
 test -f "$SESSION_PATH/session.json"
 test -f "$SESSION_PATH/unity-console.jsonl"
 test -f "$SESSION_PATH/summary.json"

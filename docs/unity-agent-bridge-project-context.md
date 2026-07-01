@@ -279,7 +279,7 @@ Unity Editor Control
 ```text
 通用 Agent / 人
     ↓
-unityctl CLI
+uv run unityctl CLI
     ↓
 本地 HTTP
     ↓
@@ -587,37 +587,40 @@ HTTP Bridge + Python CLI
 
 - HTTP Bridge 运行在 Unity Editor 内。
 - CLI 是推荐给通用 coding agent 使用的入口。
+- Python CLI 使用 `uv` 管理；除非命令显式使用 `--project`，`uv run unityctl ...` 默认在 `src/unityctl` 目录下执行。
 - MCP 暂时不做，未来可以作为外层适配。
 - WebSocket 暂时不做，日志先通过落盘和 CLI 查询实现。
 
 第一阶段 CLI：
 
 ```bash
-unityctl status
-unityctl play
-unityctl pause
-unityctl resume
-unityctl stop
-unityctl open-scene Assets/Scenes/Login.unity
-unityctl start-editor --unity "/path/to/Unity" --project "/path/to/unity/project"
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl status
+uv run unityctl play
+uv run unityctl pause
+uv run unityctl resume
+uv run unityctl stop
+uv run unityctl open-scene Assets/Scenes/Login.unity
+uv run unityctl start-editor --unity "/path/to/Unity" --project "/path/to/unity/project"
 ```
 
 第二阶段 CLI：
 
 ```bash
-unityctl play \
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl play \
   --project "/path/to/unity/project" \
   --session login-flow \
   --scene Assets/Scenes/Login.unity \
   --task "verify login flow"
 
-unityctl stop \
+uv run unityctl stop \
   --project "/path/to/unity/project" \
   --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 
-unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
-unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
-unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
+uv run unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 ```
 
 ---

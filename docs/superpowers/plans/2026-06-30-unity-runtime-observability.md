@@ -6,7 +6,7 @@
 
 **架构：** CLI 负责创建 session 目录、写入 `session.json`、调用 Bridge 开始/结束 session，并在运行结束后读取 `unity-console.jsonl` 生成 `summary.json`。Bridge 只负责接收 CLI 指定的 session 路径，捕获 Unity `Application.logMessageReceived`，把结构化日志 append 到 session 目录。文件系统是最终事实来源，HTTP 和 CLI 查询只是便捷视图。
 
-**技术栈：** Unity Editor C# UPM package、`Application.logMessageReceived`、`EditorApplication`、`EditorSceneManager`、JSON Lines、Python 3.11+、`argparse`、`urllib.request`、`pytest`。
+**技术栈：** Unity Editor C# UPM package、`Application.logMessageReceived`、`EditorApplication`、`EditorSceneManager`、JSON Lines、Python 3.11+、`uv`、`argparse`、`urllib.request`、`pytest`。
 
 ---
 
@@ -248,9 +248,8 @@ def test_create_session_writes_session_json(tmp_path):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_session.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_session.py -v
 ```
 
 预期：测试失败，错误包含 `ModuleNotFoundError: No module named 'unityctl.session'`。
@@ -367,9 +366,8 @@ def update_session_status(
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_session.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_session.py -v
 ```
 
 预期：`2 passed`。
@@ -496,9 +494,8 @@ def test_load_log_rules_returns_empty_ignore_when_file_missing(tmp_path):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_summary.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_summary.py -v
 ```
 
 预期：测试失败，错误包含 `ModuleNotFoundError: No module named 'unityctl.summary'`。
@@ -670,9 +667,8 @@ def parse_time(value: str) -> datetime:
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_summary.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_summary.py -v
 ```
 
 预期：`4 passed`。
@@ -741,9 +737,8 @@ def test_end_session_posts_empty_payload(monkeypatch):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_client.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_client.py -v
 ```
 
 预期：新增 tests 失败，原因是 `BridgeClient` 没有 `start_session` 和 `end_session`。
@@ -774,9 +769,8 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_client.py -v
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_client.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_client.py -v
 ```
 
 预期：`6 passed`。
@@ -839,9 +833,8 @@ def test_summary_command_prints_summary_file(tmp_path, capsys):
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_cli.py -v
 ```
 
 预期：新增 tests 失败，原因是 CLI 还不支持 `play --session` 和 `summary`。
@@ -961,9 +954,8 @@ from unityctl.summary import build_summary, load_log_rules, read_jsonl, write_su
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests/test_cli.py -v
 ```
 
 预期：所有 CLI tests 通过。
@@ -973,9 +965,8 @@ PYTHONPATH=src/unityctl pytest src/unityctl/tests/test_cli.py -v
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：全部 Python tests 通过。
@@ -1391,7 +1382,8 @@ git commit -m "feat: add unity session bridge routes"
 运行带 session 的 PlayMode：
 
 ```bash
-unityctl play \
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run unityctl play \
   --project "/path/to/unity/project" \
   --session login-flow \
   --scene Assets/Scenes/Login.unity \
@@ -1409,7 +1401,7 @@ CLI 会创建：
 停止并生成 summary：
 
 ```bash
-unityctl stop \
+uv run unityctl stop \
   --project "/path/to/unity/project" \
   --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 ```
@@ -1417,9 +1409,9 @@ unityctl stop \
 查看日志：
 
 ```bash
-unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
-unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
-unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
+uv run unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
 ```
 
 可选 ignore rules：
@@ -1441,9 +1433,8 @@ unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>
 Run:
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-PYTHONPATH=src/unityctl pytest src/unityctl/tests -v
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv run pytest tests -v
 ```
 
 预期：全部 Python tests 通过。
@@ -1463,15 +1454,14 @@ Run:
 正常打开 Unity project，确保 Bridge 已启动，然后运行：
 
 ```bash
-cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge
-. .venv/bin/activate
-pip install -e src/unityctl
-SESSION_OUTPUT="$(unityctl play --project "$UNITY_PROJECT" --session login-flow --scene Assets/Scenes/Login.unity --task "verify login flow")"
+cd /Users/elex-mb0203/MyWork/my_github/UnityRunBridge/src/unityctl
+uv sync
+SESSION_OUTPUT="$(uv run unityctl play --project "$UNITY_PROJECT" --session login-flow --scene Assets/Scenes/Login.unity --task "verify login flow")"
 SESSION_PATH="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["sessionPath"])' <<< "$SESSION_OUTPUT")"
-unityctl stop --project "$UNITY_PROJECT" --session-path "$SESSION_PATH"
-unityctl logs --session-path "$SESSION_PATH" --limit 20
-unityctl errors --session-path "$SESSION_PATH"
-unityctl summary --session-path "$SESSION_PATH"
+uv run unityctl stop --project "$UNITY_PROJECT" --session-path "$SESSION_PATH"
+uv run unityctl logs --session-path "$SESSION_PATH" --limit 20
+uv run unityctl errors --session-path "$SESSION_PATH"
+uv run unityctl summary --session-path "$SESSION_PATH"
 test -f "$SESSION_PATH/session.json"
 test -f "$SESSION_PATH/unity-console.jsonl"
 test -f "$SESSION_PATH/summary.json"
