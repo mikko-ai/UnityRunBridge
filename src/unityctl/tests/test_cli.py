@@ -66,3 +66,72 @@ def test_open_scene_command_sends_path(monkeypatch):
     assert clients[0].calls == [
         ("open-scene", {"scenePath": "Assets/Scenes/Login.unity"})
     ]
+
+
+def test_play_with_session_creates_session_and_starts_bridge(
+    monkeypatch, tmp_path, capsys
+):
+    clients = []
+
+    def fake_client(base_url):
+        client = FakeClient(base_url)
+        client.start_session = (
+            lambda session_id, session_path: client.calls.append(
+                (
+                    "session/start",
+                    {"sessionId": session_id, "sessionPath": session_path},
+                )
+            )
+            or {"ok": True}
+        )
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(cli, "BridgeClient", fake_client)
+    monkeypatch.setattr(
+        cli,
+        "utc_now",
+        lambda: cli.datetime.fromisoformat("2026-06-30T18:30:12+00:00"),
+    )
+
+    project = tmp_path / "Game"
+    project.mkdir()
+
+    exit_code = cli.main(
+        [
+            "play",
+            "--project",
+            str(project),
+            "--session",
+            "login-flow",
+            "--scene",
+            "Assets/Scenes/Login.unity",
+            "--task",
+            "verify login flow",
+        ]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["sessionId"] == "2026-06-30_183012_login-flow"
+    assert (
+        project
+        / ".unity-agent"
+        / "sessions"
+        / "2026-06-30_183012_login-flow"
+        / "session.json"
+    ).exists()
+    assert clients[0].calls[0][0] == "session/start"
+    assert clients[0].calls[1] == ("play", None)
+
+
+def test_summary_command_prints_summary_file(tmp_path, capsys):
+    session = tmp_path / "s1"
+    session.mkdir()
+    (session / "summary.json").write_text('{"status":"passed"}', encoding="utf-8")
+
+    exit_code = cli.main(["summary", "--session-path", str(session)])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {"status": "passed"}

@@ -20,6 +20,21 @@ class BridgeClient:
     def open_scene(self, scene_path: str) -> dict[str, Any]:
         return self.post("open-scene", {"scenePath": scene_path})
 
+    def start_session(self, session_id: str, session_path: str) -> dict[str, Any]:
+        return self.post(
+            "session/start",
+            {
+                "sessionId": session_id,
+                "sessionPath": session_path,
+            },
+        )
+
+    def end_session(self) -> dict[str, Any]:
+        return self.post("session/end")
+
+    def get_session_status(self) -> dict[str, Any]:
+        return self.get("session/status")
+
     def get(self, path: str) -> dict[str, Any]:
         url = self._url(path)
         request = Request(url, method="GET")

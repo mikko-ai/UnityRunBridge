@@ -87,3 +87,37 @@ def test_http_error_becomes_bridge_client_error(monkeypatch):
         client.post("play")
 
     assert "HTTP 500" in str(exc.value)
+
+
+def test_start_session_posts_session_payload(monkeypatch):
+    captured_body = []
+
+    def fake_urlopen(request, timeout):
+        captured_body.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(200, {"ok": True, "sessionId": "s1"})
+
+    monkeypatch.setattr("unityctl.client.urlopen", fake_urlopen)
+
+    client = BridgeClient("http://127.0.0.1:17890")
+    result = client.start_session("s1", "/tmp/project/.unity-agent/sessions/s1")
+
+    assert result == {"ok": True, "sessionId": "s1"}
+    assert captured_body == [
+        {"sessionId": "s1", "sessionPath": "/tmp/project/.unity-agent/sessions/s1"}
+    ]
+
+
+def test_end_session_posts_empty_payload(monkeypatch):
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request.full_url, request.get_method(), request.data))
+        return FakeResponse(200, {"ok": True, "message": "session ended"})
+
+    monkeypatch.setattr("unityctl.client.urlopen", fake_urlopen)
+
+    client = BridgeClient("http://127.0.0.1:17890")
+    result = client.end_session()
+
+    assert result == {"ok": True, "message": "session ended"}
+    assert calls == [("http://127.0.0.1:17890/session/end", "POST", b"{}")]
