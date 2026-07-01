@@ -57,6 +57,7 @@ Desktop.ini
 *.rej
 
 # Environment files
+.worktrees/
 .venv/
 **/.venv/
 .env
