@@ -9,7 +9,7 @@ def test_build_editor_command_uses_project_path_and_log_file():
     command = build_editor_command(
         unity_path="/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity",
         project_path="/game/project",
-        log_file="/tmp/unity-editor.log",
+        log_file="/game/project/.unity-agent/unity-editor.log",
     )
 
     assert command == [
@@ -17,7 +17,7 @@ def test_build_editor_command_uses_project_path_and_log_file():
         "-projectPath",
         "/game/project",
         "-logFile",
-        "/tmp/unity-editor.log",
+        "/game/project/.unity-agent/unity-editor.log",
     ]
 
 

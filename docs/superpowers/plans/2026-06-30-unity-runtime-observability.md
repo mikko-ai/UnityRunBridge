@@ -1027,7 +1027,7 @@ namespace Elex.UnityAgentBridge.Editor.Tests
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：测试编译失败，原因是 `SessionController` 未定义。
@@ -1254,7 +1254,7 @@ namespace Elex.UnityAgentBridge.Editor
 Run:
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：`SessionControllerTests` 通过。
@@ -1328,10 +1328,10 @@ git commit -m "feat: capture unity logs for sessions"
 Run:
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -quit -logFile "/tmp/unity-agent-bridge-observability-compile.log"
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -quit -logFile ".tmp/logs/unity-agent-bridge-observability-compile.log"
 ```
 
-预期：Unity 退出码为 `0`，并且 `/tmp/unity-agent-bridge-observability-compile.log` 中没有 `error CS`。
+预期：Unity 退出码为 `0`，并且 `.tmp/logs/unity-agent-bridge-observability-compile.log` 中没有 `error CS`。
 
 - [ ] **Step 4: 手动验证 session routes**
 
@@ -1444,7 +1444,7 @@ uv run pytest tests -v
 Run:
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：全部 Unity EditMode tests 通过。

@@ -349,7 +349,7 @@ uv run pytest tests -v
 在已安装 Bridge package 的 Unity project 中运行：
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：全部 Unity EditMode tests 通过。
@@ -432,7 +432,7 @@ uv run pytest tests -v
 在已安装 Bridge package 的 Unity project 中运行：
 
 ```bash
-"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"${UNITY_BIN:?set UNITY_BIN}" -batchmode -projectPath "${UNITY_PROJECT:?set UNITY_PROJECT}" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：全部 Unity EditMode tests 通过。

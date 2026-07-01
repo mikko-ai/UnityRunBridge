@@ -339,7 +339,7 @@ def test_build_editor_command_uses_project_path_and_log_file():
     command = build_editor_command(
         unity_path="/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity",
         project_path="/game/project",
-        log_file="/tmp/unity-editor.log",
+        log_file="/game/project/.unity-agent/unity-editor.log",
     )
 
     assert command == [
@@ -347,7 +347,7 @@ def test_build_editor_command_uses_project_path_and_log_file():
         "-projectPath",
         "/game/project",
         "-logFile",
-        "/tmp/unity-editor.log",
+        "/game/project/.unity-agent/unity-editor.log",
     ]
 
 
@@ -796,7 +796,7 @@ namespace Elex.UnityAgentBridge.Editor.Tests
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：测试编译失败，原因是 `EditorStateProvider` 未定义。
@@ -913,7 +913,7 @@ namespace Elex.UnityAgentBridge.Editor
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：`EditorStateProviderTests.GetStatus_ReturnsBridgeStatus` 通过。
@@ -973,7 +973,7 @@ namespace Elex.UnityAgentBridge.Editor.Tests
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：测试编译失败，原因是 `SceneController` 未定义。
@@ -1092,7 +1092,7 @@ namespace Elex.UnityAgentBridge.Editor
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults "/tmp/unity-agent-bridge-editmode.xml" -quit
+"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -runTests -testPlatform EditMode -testResults ".tmp/test-results/unity-agent-bridge-editmode.xml"
 ```
 
 预期：`EditorStateProviderTests` 和 `SceneControllerTests` 都通过。
@@ -1333,10 +1333,10 @@ namespace Elex.UnityAgentBridge.Editor
 在已引用 `packages/com.elex.unity-agent-bridge` 的 Unity project 中运行：
 
 ```bash
-"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -quit -logFile "/tmp/unity-agent-bridge-compile.log"
+"/path/to/Unity" -batchmode -projectPath "/path/to/unity/project" -quit -logFile ".tmp/logs/unity-agent-bridge-compile.log"
 ```
 
-预期：Unity 退出码为 `0`，并且 `/tmp/unity-agent-bridge-compile.log` 中没有 `error CS`。
+预期：Unity 退出码为 `0`，并且 `.tmp/logs/unity-agent-bridge-compile.log` 中没有 `error CS`。
 
 - [ ] **Step 3: 手动验证 bridge status**
 
