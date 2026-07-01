@@ -4,6 +4,9 @@
   "references": [
     "Elex.UnityAgentBridge.Editor"
   ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
   "includePlatforms": [
     "Editor"
   ],
