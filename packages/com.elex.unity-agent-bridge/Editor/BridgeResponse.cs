@@ -47,4 +47,28 @@ namespace Elex.UnityAgentBridge.Editor
     {
         public string scenePath;
     }
+
+    [Serializable]
+    public sealed class SessionStartRequest
+    {
+        public string sessionId;
+        public string sessionPath;
+    }
+
+    [Serializable]
+    public sealed class SessionStartResponse : BridgeResponse
+    {
+        public string sessionId;
+        public string sessionPath;
+        public string logPath;
+    }
+
+    [Serializable]
+    public sealed class SessionStatusResponse : BridgeResponse
+    {
+        public bool hasActiveSession;
+        public string sessionId;
+        public string sessionPath;
+        public string logPath;
+    }
 }
