@@ -101,6 +101,59 @@ uv run unityctl open-scene "Assets/Scenes/Login.unity"
 
 所有命令均输出 JSON。成功响应中包含 `"ok": true`。
 
+## Session-based 运行观测
+
+运行带 session 的 Play Mode：
+
+```bash
+cd "$REPO_ROOT/src/unityctl"
+uv run unityctl play \
+  --project "$UNITY_PROJECT" \
+  --session login-flow \
+  --scene Assets/Scenes/Login.unity \
+  --task "verify login flow"
+```
+
+CLI 会在 Unity 项目下创建：
+
+```text
+<ProjectRoot>/.unity-agent/sessions/<sessionId>/
+  session.json
+  unity-console.jsonl
+```
+
+停止并生成 `summary.json`：
+
+```bash
+uv run unityctl stop \
+  --project "$UNITY_PROJECT" \
+  --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+```
+
+查看日志和 summary：
+
+```bash
+uv run unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
+uv run unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+```
+
+可选 ignore rules：
+
+```json
+{
+  "ignore": [
+    {
+      "type": "Error",
+      "messageContains": "Expected test error"
+    }
+  ]
+}
+```
+
+将 ignore rules 保存到 Unity 项目的 `.unity-agent/log-rules.json`。第一版只支持
+`ignore`，匹配字段为 `type` 和 `messageContains`。
+
 ## 运行测试
 
 Python 测试：
