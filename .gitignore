@@ -16,6 +16,7 @@ build/
 out/
 target/
 coverage/
+*.egg-info/
 
 # System files
 .DS_Store
@@ -33,6 +34,8 @@ Desktop.ini
 *.sln.docstates
 
 # Temporary files
+__pycache__/
+**/__pycache__/
 *.tmp
 *.temp
 *.swp
