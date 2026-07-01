@@ -19,7 +19,11 @@ namespace Elex.UnityAgentBridge.Editor
                 isPlaying = EditorApplication.isPlaying,
                 isPaused = EditorApplication.isPaused,
                 isCompiling = EditorApplication.isCompiling,
-                isUpdating = EditorApplication.isUpdating
+                isUpdating = EditorApplication.isUpdating,
+                hasActiveSession = SessionController.HasActiveSession,
+                sessionId = SessionController.CurrentSessionId,
+                sessionPath = SessionController.CurrentSessionPath,
+                logPath = SessionController.CurrentLogPath
             };
         }
     }

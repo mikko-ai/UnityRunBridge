@@ -1,11 +1,15 @@
 using System;
 using System.IO;
+using UnityEditor;
 using UnityEngine;
 
 namespace Elex.UnityAgentBridge.Editor
 {
     internal static class SessionController
     {
+        private const string SessionIdKey = "Elex.UnityAgentBridge.SessionId";
+        private const string SessionPathKey = "Elex.UnityAgentBridge.SessionPath";
+
         private static string currentSessionId = string.Empty;
         private static string currentSessionPath = string.Empty;
         private static SessionLogWriter logWriter;
@@ -35,6 +39,7 @@ namespace Elex.UnityAgentBridge.Editor
             string logPath = Path.Combine(currentSessionPath, "unity-console.jsonl");
             logWriter = new SessionLogWriter(logPath);
             Application.logMessageReceived += OnLogMessageReceived;
+            RememberSession(currentSessionId, currentSessionPath);
 
             return new SessionStartResponse
             {
@@ -53,6 +58,7 @@ namespace Elex.UnityAgentBridge.Editor
             {
                 currentSessionId = string.Empty;
                 currentSessionPath = string.Empty;
+                ForgetSession();
                 return BridgeResponse.Success("no active session");
             }
 
@@ -61,7 +67,37 @@ namespace Elex.UnityAgentBridge.Editor
             logWriter = null;
             currentSessionId = string.Empty;
             currentSessionPath = string.Empty;
+            ForgetSession();
             return BridgeResponse.Success("session ended");
+        }
+
+        public static void RestoreActiveSession()
+        {
+            if (logWriter != null)
+            {
+                return;
+            }
+
+            string sessionId = SessionState.GetString(SessionIdKey, string.Empty);
+            string sessionPath = SessionState.GetString(SessionPathKey, string.Empty);
+            if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(sessionPath))
+            {
+                return;
+            }
+
+            string projectRoot = GetProjectRoot();
+            if (!IsAllowedSessionPath(projectRoot, sessionPath))
+            {
+                ForgetSession();
+                return;
+            }
+
+            currentSessionId = sessionId;
+            currentSessionPath = Path.GetFullPath(sessionPath);
+            string logPath = Path.Combine(currentSessionPath, "unity-console.jsonl");
+            logWriter = new SessionLogWriter(logPath);
+            Application.logMessageReceived -= OnLogMessageReceived;
+            Application.logMessageReceived += OnLogMessageReceived;
         }
 
         public static SessionStatusResponse GetStatus()
@@ -94,6 +130,18 @@ namespace Elex.UnityAgentBridge.Editor
         private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
         {
             logWriter?.Write(condition, stackTrace, type);
+        }
+
+        private static void RememberSession(string sessionId, string sessionPath)
+        {
+            SessionState.SetString(SessionIdKey, sessionId);
+            SessionState.SetString(SessionPathKey, sessionPath);
+        }
+
+        private static void ForgetSession()
+        {
+            SessionState.EraseString(SessionIdKey);
+            SessionState.EraseString(SessionPathKey);
         }
 
         private static string GetProjectRoot()

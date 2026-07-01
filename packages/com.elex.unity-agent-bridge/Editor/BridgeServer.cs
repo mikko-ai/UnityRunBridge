@@ -21,7 +21,8 @@ namespace Elex.UnityAgentBridge.Editor
         {
             EditorApplication.update += ProcessPendingRequests;
             AssemblyReloadEvents.beforeAssemblyReload += Stop;
-            EditorApplication.quitting += Stop;
+            EditorApplication.quitting += StopForEditorQuit;
+            SessionController.RestoreActiveSession();
             Start();
         }
 
@@ -61,7 +62,7 @@ namespace Elex.UnityAgentBridge.Editor
 
             EditorApplication.update -= ProcessPendingRequests;
             AssemblyReloadEvents.beforeAssemblyReload -= Stop;
-            EditorApplication.quitting -= Stop;
+            EditorApplication.quitting -= StopForEditorQuit;
 
             if (listener != null)
             {
@@ -69,6 +70,12 @@ namespace Elex.UnityAgentBridge.Editor
                 listener.Close();
                 listener = null;
             }
+        }
+
+        private static void StopForEditorQuit()
+        {
+            SessionController.EndSession();
+            Stop();
         }
 
         private static void ListenLoop()
@@ -168,6 +175,27 @@ namespace Elex.UnityAgentBridge.Editor
                 string body = ReadBody(request);
                 OpenSceneRequest sceneRequest = JsonUtility.FromJson<OpenSceneRequest>(body);
                 return SceneController.OpenScene(sceneRequest == null ? string.Empty : sceneRequest.scenePath);
+            }
+
+            if (method == "POST" && path == "session/start")
+            {
+                string body = ReadBody(request);
+                SessionStartRequest sessionRequest = JsonUtility.FromJson<SessionStartRequest>(body);
+                if (sessionRequest == null)
+                {
+                    return BridgeResponse.Failure("invalid session start request");
+                }
+                return SessionController.StartSession(sessionRequest.sessionId, sessionRequest.sessionPath);
+            }
+
+            if (method == "POST" && path == "session/end")
+            {
+                return SessionController.EndSession();
+            }
+
+            if (method == "GET" && path == "session/status")
+            {
+                return SessionController.GetStatus();
             }
 
             return BridgeResponse.Failure($"unsupported route: {method} /{path}");

@@ -40,6 +40,10 @@ namespace Elex.UnityAgentBridge.Editor
         public bool isPaused;
         public bool isCompiling;
         public bool isUpdating;
+        public bool hasActiveSession;
+        public string sessionId;
+        public string sessionPath;
+        public string logPath;
     }
 
     [Serializable]
