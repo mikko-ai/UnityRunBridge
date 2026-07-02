@@ -6,5 +6,5 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "运行 Python tests..."
 cd "$REPO_ROOT/src/unityctl"
-uv sync
+uv sync --reinstall-package unity-run-bridge
 uv run pytest tests -v "$@"
