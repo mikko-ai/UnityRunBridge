@@ -9,7 +9,7 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 进入、停止、暂停和恢复 Play Mode。
 - 打开 Unity 项目中的场景。
 
-桥接服务在 Unity Editor 内监听 `http://127.0.0.1:17890`。
+桥接服务默认在 Unity Editor 内监听 `http://127.0.0.1:17890`，也可以通过 Unity 项目根目录下的 `.unity-agent/config.json` 配置独立端口。
 
 ## 环境要求
 
@@ -33,70 +33,98 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 
 ## 安装 CLI
 
-在本仓库中执行：
-
-```bash
-cd src/unityctl
-uv sync
-```
-
-使用 `uv run unityctl ...` 运行命令。
-
-## 配置本地路径
-
-`UNITY_BIN` 和 `UNITY_PROJECT` 并非硬编码的项目设置，它们是以下示例中用到的普通 shell 变量，以便每台机器可以指定自己的 Unity 安装路径和 Unity 项目路径。
-
-`UNITY_BIN` 应指向 Unity 命令行可执行文件：
-
-```bash
-export UNITY_BIN="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
-```
-
-如果你从 `.app` 路径（如 `/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app`）开始，请在末尾追加 `/Contents/MacOS/Unity`。
-
-`UNITY_PROJECT` 应指向 Unity 项目根目录，即包含 `Assets`、`Packages` 和 `ProjectSettings` 的目录：
-
-```bash
-export UNITY_PROJECT="/absolute/path/to/your/unity-project"
-```
-
-为便于重复本地运行，请将日志保存在本仓库下：
+本地开发安装：
 
 ```bash
 cd /absolute/path/to/UnityRunBridge
-export REPO_ROOT="$(pwd)"
-mkdir -p "$REPO_ROOT/.tmp/logs"
+uv tool install --editable ./src/unityctl
+```
+
+安装后可以在任意目录运行：
+
+```bash
+unityctl --help
+```
+
+开发调试 CLI 时，也可以继续在 `src/unityctl` 下使用低层开发命令：
+
+```bash
+cd src/unityctl
+uv run unityctl --help
+```
+
+## 初始化 Unity Project
+
+在 Unity 项目根目录执行。Unity 项目根目录指包含 `Assets`、`Packages` 和 `ProjectSettings` 的目录：
+
+```bash
+cd /absolute/path/to/UnityProject
+unityctl init \
+  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" \
+  --unity-version "2022.3.62f2" \
+  --port 17890
+```
+
+`unityctl init` 会创建：
+
+```text
+.unity-agent/config.json
+.unity-agent/config.local.json
+```
+
+`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge host/port 和 session 目录。`config.local.json` 保存本机配置，例如 Unity 安装路径，应被 `.gitignore` 忽略。
+
+查看有效配置：
+
+```bash
+unityctl config show
+```
+
+更新本机 Unity 路径：
+
+```bash
+unityctl config set-local unityAppPath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"
 ```
 
 ## 启动 Unity
 
-在 `src/unityctl` 目录下执行：
-
 ```bash
-cd "$REPO_ROOT/src/unityctl"
-uv run unityctl start-editor \
-  --unity "$UNITY_BIN" \
-  --project "$UNITY_PROJECT" \
-  --log-file "$REPO_ROOT/.tmp/logs/unity-editor.log"
+unityctl start
 ```
 
-等待 Unity 日志中出现：
+默认会等待 Bridge ready。需要只启动 Unity 进程时：
+
+```bash
+unityctl start --no-wait
+```
+
+启动成功后，Unity 日志中会出现类似：
 
 ```text
 Unity Agent Bridge listening on http://127.0.0.1:17890/
 ```
 
-## 控制 Editor
-
-在 `src/unityctl` 目录下执行：
+低层开发命令仍然可用：
 
 ```bash
-uv run unityctl status
-uv run unityctl play
-uv run unityctl pause
-uv run unityctl resume
-uv run unityctl stop
-uv run unityctl open-scene "Assets/Scenes/Login.unity"
+cd /absolute/path/to/UnityRunBridge/src/unityctl
+uv run unityctl start-editor \
+  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" \
+  --project "/absolute/path/to/UnityProject" \
+  --log-file "/absolute/path/to/UnityProject/.unity-agent/unity-editor.log"
+```
+
+## 控制 Editor
+
+在 Unity 项目根目录或其子目录执行：
+
+```bash
+unityctl status
+unityctl play
+unityctl pause
+unityctl resume
+unityctl stop
+unityctl open-scene "Assets/Scenes/Login.unity"
 ```
 
 所有命令均输出 JSON。成功响应中包含 `"ok": true`。
@@ -106,9 +134,7 @@ uv run unityctl open-scene "Assets/Scenes/Login.unity"
 运行带 session 的 Play Mode：
 
 ```bash
-cd "$REPO_ROOT/src/unityctl"
-uv run unityctl play \
-  --project "$UNITY_PROJECT" \
+unityctl play \
   --session login-flow \
   --scene Assets/Scenes/Login.unity \
   --task "verify login flow"
@@ -125,17 +151,21 @@ CLI 会在 Unity 项目下创建：
 停止并生成 `summary.json`：
 
 ```bash
-uv run unityctl stop \
-  --project "$UNITY_PROJECT" \
-  --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+unityctl stop --latest
 ```
 
 查看日志和 summary：
 
 ```bash
-uv run unityctl logs --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>" --limit 100
-uv run unityctl errors --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
-uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<sessionId>"
+unityctl logs --latest --limit 100
+unityctl errors --latest
+unityctl summary --latest
+```
+
+也可以显式指定 session 目录：
+
+```bash
+unityctl summary --session-path "/absolute/path/to/UnityProject/.unity-agent/sessions/2026-07-02_100000_login-flow"
 ```
 
 可选 ignore rules：
@@ -163,6 +193,7 @@ schemas/session.schema.json
 schemas/unity-console-log.schema.json
 schemas/summary.schema.json
 schemas/log-rules.schema.json
+schemas/unity-agent-config.schema.json
 ```
 
 `examples/` 提供最小可读样例：
@@ -173,6 +204,8 @@ examples/log-rules.json
 examples/sessions/session.json
 examples/sessions/unity-console.jsonl
 examples/sessions/summary.json
+examples/unity-agent-config/config.json
+examples/unity-agent-config/config.local.json
 ```
 
 ## 运行测试

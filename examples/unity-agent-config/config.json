@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "unityVersion": "2022.3.62f2",
+  "bridge": {
+    "host": "127.0.0.1",
+    "port": 17890
+  },
+  "defaultScene": null,
+  "sessionDirectory": ".unity-agent/sessions"
+}
