@@ -21,7 +21,25 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 
 ## 添加 Unity 包
 
-将包添加到 Unity 项目的 `Packages/manifest.json` 中：
+将包添加到 Unity 项目的 `Packages/manifest.json` 中。
+
+### 正式引用（推荐）
+
+通过 GitHub 远端地址引用已发布的 UPM 包：
+
+```json
+{
+  "dependencies": {
+    "com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/v0.1.0"
+  }
+}
+```
+
+将 `upm/v0.1.0` 替换为需要的版本 tag。该包仅在 Editor 下运行，并在 Unity Editor 加载时启动本地桥接服务。
+
+### 本地开发
+
+在本仓库内开发包时，可使用 `file:` 引用：
 
 ```json
 {
@@ -31,7 +49,7 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 }
 ```
 
-请使用本仓库在你机器上的绝对路径。该包仅在 Editor 下运行，并在 Unity Editor 加载时启动本地桥接服务。
+请使用本仓库在你机器上的绝对路径。
 
 ## 安装 CLI
 
@@ -266,4 +284,26 @@ scripts/package-upm.sh
 
 ```bash
 DIST_DIR="$REPO_ROOT/.tmp/release" scripts/package-upm.sh
+```
+
+### 发布流程
+
+1. 更新 [packages/com.mk.unity-agent-bridge/package.json](packages/com.mk.unity-agent-bridge/package.json) 中的 `version`。
+2. 合并到 `main` 分支。
+3. 打 tag 并推送：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+4. GitHub Actions 会自动：
+   - 校验 tag 版本与 `package.json` 一致
+   - 将包切出到 `upm` 分支，并创建 `upm/vX.Y.Z` tag
+   - 创建 GitHub Release，附带 `.tgz` 产物
+
+发布后，Unity 项目可通过以下方式引用：
+
+```json
+"com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/v0.1.0"
 ```

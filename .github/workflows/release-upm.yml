@@ -1,0 +1,69 @@
+name: Release UPM
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_VERSION="$(python3 -c "import json; print(json.load(open('packages/com.mk.unity-agent-bridge/package.json'))['version'])")"
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version (v${TAG_VERSION}) does not match package.json version (${PACKAGE_VERSION})"
+            exit 1
+          fi
+          echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Validated version: ${TAG_VERSION}"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Split and publish upm branch
+        run: |
+          git subtree split --prefix=packages/com.mk.unity-agent-bridge -b upm-split
+          git push origin upm-split:upm --force
+          git tag -f "upm/v${{ steps.version.outputs.version }}" upm-split
+          git push origin "upm/v${{ steps.version.outputs.version }}" --force
+
+      - name: Package UPM tarball
+        id: package
+        run: |
+          # 脚本 stdout 包含进度信息，产物路径在最后一行
+          ARCHIVE_PATH="$(bash scripts/package-upm.sh | tail -n 1)"
+          if [ ! -f "$ARCHIVE_PATH" ]; then
+            echo "打包产物不存在：$ARCHIVE_PATH"
+            exit 1
+          fi
+          echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            # Release 已存在（重跑场景），只补传/覆盖附件
+            gh release upload "${{ github.ref_name }}" \
+              --clobber \
+              "${{ steps.package.outputs.archive_path }}"
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "${{ github.ref_name }}" \
+              --generate-notes \
+              "${{ steps.package.outputs.archive_path }}"
+          fi
