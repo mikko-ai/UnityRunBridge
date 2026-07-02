@@ -270,10 +270,10 @@ unityctl start
 等价于当前：
 
 ```bash
-unityctl start-editor --unity <resolved-unity> --project <resolved-project>
+unityctl start-editor --unity "$effective_unity_executable_path" --project "$effective_project_path"
 ```
 
-后续可以保留 `start-editor` 作为低层命令，但用户文档优先使用 `start`。
+其中 `effective_unity_executable_path` 来自 `config.local.json` 的 `unityAppPath` 归一化结果，`effective_project_path` 来自当前发现到的 Unity project root。后续可以保留 `start-editor` 作为低层命令，但用户文档优先使用 `start`。
 
 ### 运行观测
 
@@ -298,7 +298,7 @@ uv tool install --editable ./src/unityctl
 远程 Git 安装也使用 `uv tool install`，具体 URL 由仓库发布地址决定：
 
 ```bash
-UNITY_RUN_BRIDGE_GIT_URL="https://github.com/example/UnityRunBridge.git"
+UNITY_RUN_BRIDGE_GIT_URL="git@github.com:mikko-ai/UnityRunBridge.git"
 uv tool install "git+$UNITY_RUN_BRIDGE_GIT_URL#subdirectory=src/unityctl"
 ```
 
@@ -309,6 +309,32 @@ uv tool install "git+$UNITY_RUN_BRIDGE_GIT_URL#subdirectory=src/unityctl"
 - 相比自制 install script，第一版维护成本更低。
 
 后续如果需要给非 Python 用户更顺滑的安装体验，再考虑安装脚本或单文件打包。
+
+### 包名与命令名
+
+Python package / uv tool package 名应使用更具体的：
+
+```toml
+[project]
+name = "unity-run-bridge"
+```
+
+全局命令名继续使用短命令：
+
+```toml
+[project.scripts]
+unityctl = "unityctl.cli:main"
+```
+
+内部 Python import package 可以继续保留 `unityctl`。这样安装和发布时的包名不至于过于泛化，日常使用时仍然保留简短的命令体验：
+
+```bash
+unityctl init
+unityctl start
+unityctl play --session login-flow
+```
+
+预期 `uv tool install` 输出中，package 名是 `unity-run-bridge`，executable 是 `unityctl`。
 
 ## 文件与 Git 策略
 
