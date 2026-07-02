@@ -21,6 +21,19 @@ def test_build_editor_command_uses_project_path_and_log_file():
     ]
 
 
+def test_build_editor_command_accepts_unity_app_bundle():
+    command = build_editor_command(
+        unity_path="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app",
+        project_path="/game/project",
+        log_file="/game/project/.unity-agent/unity-editor.log",
+    )
+
+    assert command[0] == (
+        "/Applications/Unity/Hub/Editor/2022.3.62f2/"
+        "Unity.app/Contents/MacOS/Unity"
+    )
+
+
 def test_validate_project_path_accepts_directory_with_assets(tmp_path):
     project = tmp_path / "Game"
     (project / "Assets").mkdir(parents=True)

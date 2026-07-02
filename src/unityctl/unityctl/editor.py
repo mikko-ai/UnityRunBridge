@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+from unityctl.config import normalize_unity_executable_path
+
 
 def validate_project_path(project_path: str | Path) -> Path:
     project = Path(project_path).expanduser().resolve()
@@ -15,10 +17,13 @@ def build_editor_command(
     project_path: str | Path,
     log_file: str | Path,
 ) -> list[str]:
+    executable = normalize_unity_executable_path(unity_path)
+    if executable is None:
+        raise ValueError("Unity executable path is required")
     project = str(Path(project_path).expanduser())
     log_path = str(Path(log_file).expanduser())
     return [
-        unity_path,
+        str(executable),
         "-projectPath",
         project,
         "-logFile",
