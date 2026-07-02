@@ -7,7 +7,14 @@ namespace Elex.UnityAgentBridge.Editor.Tests
         [Test]
         public void FromJson_ReadsBridgeHostAndPort()
         {
-            string json = "{\"bridge\":{\"host\":\"127.0.0.1\",\"port\":17891}}";
+            string json = @"
+            // 项目级配置
+            {
+                ""bridge"": {
+                    ""host"": ""127.0.0.1"",
+                    ""port"": 17891,
+                },
+            }";
 
             BridgeProjectConfig.Settings settings = BridgeProjectConfig.FromJson(json);
 

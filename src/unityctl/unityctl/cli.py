@@ -9,9 +9,11 @@ from unityctl.client import BridgeClient, BridgeClientError
 from unityctl.config import (
     ConfigError,
     find_latest_session_path,
+    find_unity_project_root,
     init_project_config,
     read_json,
     resolve_effective_config,
+    validate_project_config,
     write_json,
 )
 from unityctl.editor import start_editor
@@ -35,10 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--port", type=int, default=17890)
     init.add_argument("--scene", dest="default_scene")
     init.add_argument("--install-package", action="store_true")
+    init.add_argument("--yes", action="store_true")
+    init.add_argument("--force", action="store_true")
 
     config = subparsers.add_parser("config")
     config_subparsers = config.add_subparsers(dest="config_command", required=True)
     config_subparsers.add_parser("show")
+    config_subparsers.add_parser("validate")
     set_local = config_subparsers.add_parser("set-local")
     set_local.add_argument("key")
     set_local.add_argument("value")
@@ -102,13 +107,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "init":
+            project = find_unity_project_root(args.project_path or Path.cwd())
+            if not args.yes:
+                confirm_init(project, force=args.force)
             result = init_project_config(
-                project_path=args.project_path or Path.cwd(),
+                project_path=project,
                 unity_path=args.unity_path,
                 unity_version=args.unity_version,
                 host=args.host,
                 port=args.port,
                 default_scene=args.default_scene,
+                force=args.force,
             )
             print_json(
                 {
@@ -118,16 +127,38 @@ def main(argv: list[str] | None = None) -> int:
                     "localConfigPath": str(result.local_config_path),
                     "bridgeUrl": result.bridge_url,
                     "packageInstalled": result.package_installed,
+                    "alreadyInitialized": bool(result.kept_paths),
+                    "createdPaths": [str(path) for path in result.created_paths],
+                    "keptPaths": [str(path) for path in result.kept_paths],
+                    "updatedIgnore": result.updated_ignore,
                     "nextSteps": [
-                        "Add com.elex.unity-agent-bridge to Packages/manifest.json",
+                        "Edit .unity-agent/config.local.jsonc and set unityExecutablePath",
+                        "Run unityctl config validate",
                         "Run unityctl start",
-                        "Run unityctl status",
                     ],
                 }
             )
             return 0
 
         if args.command == "config":
+            if args.config_command == "validate":
+                project = find_unity_project_root(args.project_path or Path.cwd())
+                result = validate_project_config(project)
+                print_json(
+                    {
+                        "ok": result.ok,
+                        "projectPath": str(result.project_path),
+                        "errors": [
+                            {"field": issue.field, "message": issue.message}
+                            for issue in result.errors
+                        ],
+                        "warnings": [
+                            {"field": issue.field, "message": issue.message}
+                            for issue in result.warnings
+                        ],
+                    }
+                )
+                return 0 if result.ok else 1
             effective = resolve_effective_config(
                 project_path=args.project_path,
                 base_url=args.base_url,
@@ -181,8 +212,10 @@ def main(argv: list[str] | None = None) -> int:
             unity_executable = args.unity_path or effective.unity_executable_path
             if unity_executable is None:
                 raise ValueError(
-                    "Unity path is required. Run unityctl config set-local unityAppPath "
-                    '"/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"'
+                    "Unity executable path is required. Edit "
+                    ".unity-agent/config.local.jsonc or run unityctl config set-local "
+                    "unityExecutablePath "
+                    '"/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"'
                 )
             log_file = (
                 Path(args.log_file).expanduser()
@@ -318,6 +351,17 @@ def main(argv: list[str] | None = None) -> int:
 
 def print_json(payload: dict, stream=None) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2), file=stream or sys.stdout)
+
+
+def confirm_init(project_path: Path, force: bool = False) -> None:
+    if not sys.stdin.isatty():
+        raise ValueError("init 需要确认项目路径；在脚本中请添加 --yes")
+    action = "重新生成缺失或已有配置" if force else "初始化缺失配置"
+    print(f"将为以下 Unity 项目{action}：", file=sys.stderr)
+    print(str(project_path), file=sys.stderr)
+    answer = input("是否继续？[y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("用户取消 init")
 
 
 def command_requires_project(args) -> bool:

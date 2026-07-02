@@ -9,7 +9,7 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 进入、停止、暂停和恢复 Play Mode。
 - 打开 Unity 项目中的场景。
 
-桥接服务默认在 Unity Editor 内监听 `http://127.0.0.1:17890`，也可以通过 Unity 项目根目录下的 `.unity-agent/config.json` 配置独立端口。
+桥接服务默认在 Unity Editor 内监听 `http://127.0.0.1:17890`，也可以通过 Unity 项目根目录下的 `.unity-agent/config.jsonc` 配置独立端口。
 
 ## 环境要求
 
@@ -59,20 +59,25 @@ uv run unityctl --help
 
 ```bash
 cd /absolute/path/to/UnityProject
-unityctl init \
-  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" \
-  --unity-version "2022.3.62f2" \
-  --port 17890
+unityctl init
 ```
+
+`init` 会展示检测到的 Unity project root，并要求确认后才写入文件。脚本或 CI 中可以使用 `unityctl init --yes`。
 
 `unityctl init` 会创建：
 
 ```text
-.unity-agent/config.json
-.unity-agent/config.local.json
+.unity-agent/config.jsonc
+.unity-agent/config.local.jsonc
 ```
 
-`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge host/port 和 session 目录。`config.local.json` 保存本机配置，例如 Unity 安装路径，应被 `.gitignore` 忽略。
+如果已经初始化，`init` 只补缺失文件，不会覆盖已有配置。`config.jsonc` 保存可提交的项目配置，例如 Unity 版本、Bridge host/port 和 session 目录。`config.local.jsonc` 保存本机配置，例如 Unity 可执行文件路径，应被 `.gitignore` 忽略。
+
+校验配置：
+
+```bash
+unityctl config validate
+```
 
 查看有效配置：
 
@@ -83,7 +88,7 @@ unityctl config show
 更新本机 Unity 路径：
 
 ```bash
-unityctl config set-local unityAppPath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"
+unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
 ```
 
 ## 启动 Unity
@@ -109,7 +114,7 @@ Unity Agent Bridge listening on http://127.0.0.1:17890/
 ```bash
 cd /absolute/path/to/UnityRunBridge/src/unityctl
 uv run unityctl start-editor \
-  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" \
+  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity" \
   --project "/absolute/path/to/UnityProject" \
   --log-file "/absolute/path/to/UnityProject/.unity-agent/unity-editor.log"
 ```
@@ -204,8 +209,8 @@ examples/log-rules.json
 examples/sessions/session.json
 examples/sessions/unity-console.jsonl
 examples/sessions/summary.json
-examples/unity-agent-config/config.json
-examples/unity-agent-config/config.local.json
+examples/unity-agent-config/config.jsonc
+examples/unity-agent-config/config.local.jsonc
 ```
 
 ## 运行测试

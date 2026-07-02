@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace Elex.UnityAgentBridge.Editor
@@ -27,7 +29,8 @@ namespace Elex.UnityAgentBridge.Editor
                 return Settings.Default();
             }
 
-            ConfigPayload payload = JsonUtility.FromJson<ConfigPayload>(json);
+            string cleanJson = StripTrailingCommas(StripComments(json));
+            ConfigPayload payload = JsonUtility.FromJson<ConfigPayload>(cleanJson);
             if (payload == null || payload.bridge == null)
             {
                 return Settings.Default();
@@ -51,7 +54,76 @@ namespace Elex.UnityAgentBridge.Editor
             string projectRoot = assetsDirectory.Parent == null
                 ? string.Empty
                 : assetsDirectory.Parent.FullName;
-            return Path.Combine(projectRoot, ".unity-agent", "config.json");
+            return Path.Combine(projectRoot, ".unity-agent", "config.jsonc");
+        }
+
+        private static string StripComments(string text)
+        {
+            StringBuilder builder = new StringBuilder();
+            bool inString = false;
+            bool escape = false;
+
+            for (int i = 0; i < text.Length; i++)
+            {
+                char current = text[i];
+                char next = i + 1 < text.Length ? text[i + 1] : '\0';
+
+                if (inString)
+                {
+                    builder.Append(current);
+                    if (escape)
+                    {
+                        escape = false;
+                    }
+                    else if (current == '\\')
+                    {
+                        escape = true;
+                    }
+                    else if (current == '"')
+                    {
+                        inString = false;
+                    }
+                    continue;
+                }
+
+                if (current == '"')
+                {
+                    inString = true;
+                    builder.Append(current);
+                    continue;
+                }
+
+                if (current == '/' && next == '/')
+                {
+                    i += 2;
+                    while (i < text.Length && text[i] != '\n' && text[i] != '\r')
+                    {
+                        i++;
+                    }
+                    i--;
+                    continue;
+                }
+
+                if (current == '/' && next == '*')
+                {
+                    i += 2;
+                    while (i + 1 < text.Length && !(text[i] == '*' && text[i + 1] == '/'))
+                    {
+                        i++;
+                    }
+                    i++;
+                    continue;
+                }
+
+                builder.Append(current);
+            }
+
+            return builder.ToString();
+        }
+
+        private static string StripTrailingCommas(string text)
+        {
+            return Regex.Replace(text, @",\s*([}\]])", "$1");
         }
 
         [Serializable]

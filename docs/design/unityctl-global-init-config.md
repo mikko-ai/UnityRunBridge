@@ -62,14 +62,15 @@ Unity project 有两类配置：
 因此配置拆成两个文件：
 
 ```text
-ProjectName/.unity-agent/config.json
-ProjectName/.unity-agent/config.local.json
+ProjectName/.unity-agent/config.jsonc
+ProjectName/.unity-agent/config.local.jsonc
 ```
 
-`config.json` 是可提交配置，保存项目共享事实：
+`config.jsonc` 是可提交配置，保存项目共享事实：
 
-```json
+```jsonc
 {
+  // 配置结构版本，用于解析和未来迁移；不是 unityctl 版本，也不是 Unity 版本。
   "version": 1,
   "unityVersion": "2022.3.62f2",
   "bridge": {
@@ -81,15 +82,15 @@ ProjectName/.unity-agent/config.local.json
 }
 ```
 
-`config.local.json` 是本机配置，保存机器相关事实：
+`config.local.jsonc` 是本机配置，保存机器相关事实：
 
-```json
+```jsonc
 {
-  "unityAppPath": "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"
+  "unityExecutablePath": "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
 }
 ```
 
-`config.local.json` 必须默认加入 Unity project 的 ignore 规则。它可以放入：
+`config.local.jsonc` 必须默认加入 Unity project 的 ignore 规则。它可以放入：
 
 ```text
 ProjectName/.gitignore
@@ -98,36 +99,31 @@ ProjectName/.gitignore
 新增内容：
 
 ```gitignore
-.unity-agent/config.local.json
+.unity-agent/config.local.jsonc
 ```
 
-如果目标 Unity project 不使用 Git，`unityctl init` 仍然创建 `config.local.json`，但只提示无法自动更新 ignore。
+如果目标 Unity project 不使用 Git，`unityctl init` 仍然创建 `config.local.jsonc`，但只提示无法自动更新 ignore。
 
 ### 3. Unity 版本属于项目，Unity 路径属于本机
 
-不同项目可能使用不同 Unity 版本，因此 `unityVersion` 应写入 `config.json`。但是 Unity 安装路径是本机事实，应写入 `config.local.json`。
+不同项目可能使用不同 Unity 版本，因此 `unityVersion` 可以写入 `config.jsonc` 作为项目期望版本，用于提示和校验。但是 Unity 启动路径是本机事实，应写入 `config.local.jsonc` 的 `unityExecutablePath`。
 
 `unityctl start` 的解析顺序：
 
 1. 命令行 `--unity`。
-2. `.unity-agent/config.local.json` 的 `unityAppPath` 或 `unityExecutablePath`。
-3. 如果只有 `unityVersion`，尝试按常见 Unity Hub 路径推断：
+2. `.unity-agent/config.local.jsonc` 的 `unityExecutablePath`。
 
-```text
-/Applications/Unity/Hub/Editor/<unityVersion>/Unity.app
-```
-
-推断失败时，命令返回清晰错误，提示运行：
+缺少路径时，命令返回清晰错误，提示运行：
 
 ```bash
-unityctl config set-local unityAppPath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"
+unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
 ```
 
-第一版可以支持 `.app` 路径和 `Contents/MacOS/Unity` 可执行路径。CLI 内部统一规范化为可执行路径。
+推荐直接配置 Unity 可执行文件路径。macOS 是 `Unity.app/Contents/MacOS/Unity`，Windows 是 `Editor/Unity.exe`。
 
 ### 4. Bridge URL 属于项目配置
 
-Bridge host/port 应放在 `config.json`，不是全局配置。原因：
+Bridge host/port 应放在 `config.jsonc`，不是全局配置。原因：
 
 - 可能同时打开两个不同 Unity project。
 - 不同项目可以使用不同端口，避免 `HttpListener` 端口冲突。
@@ -137,12 +133,12 @@ Bridge host/port 应放在 `config.json`，不是全局配置。原因：
 
 ```text
 CLI
-  -> 读取 .unity-agent/config.json
+  -> 读取 .unity-agent/config.jsonc
   -> 请求 http://<host>:<port>
 
 Unity package
   -> 通过 Application.dataPath 找到 project root
-  -> 读取 .unity-agent/config.json
+  -> 读取 .unity-agent/config.jsonc
   -> 使用 bridge.host + bridge.port 启动 HttpListener
 ```
 
@@ -162,20 +158,25 @@ port = 17890
 第一版命令形态：
 
 ```bash
-unityctl init \
-  --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" \
-  --port 17891
+unityctl init
 ```
 
 行为：
 
 1. 从当前目录向上查找 Unity project root。
-2. 创建 `.unity-agent/`。
-3. 写入或更新 `.unity-agent/config.json`。
-4. 写入或更新 `.unity-agent/config.local.json`。
-5. 确保 `.unity-agent/config.local.json` 被 ignore。
-6. 检查 `Packages/manifest.json` 是否已接入 `com.elex.unity-agent-bridge`。
-7. 输出下一步命令。
+2. 展示将要初始化的 Unity project root，并要求用户确认。
+3. 创建 `.unity-agent/`。
+4. 只补缺失文件：缺 `config.jsonc` 就创建，已有则保持原样。
+5. 只补缺失文件：缺 `config.local.jsonc` 就创建，已有则保持原样。
+6. 确保 `.unity-agent/config.local.jsonc` 被 ignore。
+7. 检查 `Packages/manifest.json` 是否已接入 `com.elex.unity-agent-bridge`。
+8. 输出下一步命令，提醒用户编辑 local 配置并运行 `unityctl config validate`。
+
+脚本或 CI 可以使用：
+
+```bash
+unityctl init --yes
+```
 
 初始输出示例：
 
@@ -183,11 +184,18 @@ unityctl init \
 {
   "ok": true,
   "projectPath": "/Users/example/Game",
-  "configPath": "/Users/example/Game/.unity-agent/config.json",
-  "localConfigPath": "/Users/example/Game/.unity-agent/config.local.json",
-  "bridgeUrl": "http://127.0.0.1:17891",
+  "configPath": "/Users/example/Game/.unity-agent/config.jsonc",
+  "localConfigPath": "/Users/example/Game/.unity-agent/config.local.jsonc",
+  "bridgeUrl": "http://127.0.0.1:17890",
   "packageInstalled": false,
+  "createdPaths": [
+    "/Users/example/Game/.unity-agent/config.jsonc",
+    "/Users/example/Game/.unity-agent/config.local.jsonc"
+  ],
+  "keptPaths": [],
   "nextSteps": [
+    "Edit .unity-agent/config.local.jsonc and set unityExecutablePath",
+    "Run unityctl config validate",
     "Add com.elex.unity-agent-bridge to Packages/manifest.json",
     "Run unityctl start",
     "Run unityctl status"
@@ -209,8 +217,8 @@ CLI 参数优先级从高到低：
 
 1. 显式命令行参数，例如 `--project`、`--unity`、`--base-url`。
 2. 当前目录向上发现的 Unity project root。
-3. 当前 project 的 `.unity-agent/config.local.json`。
-4. 当前 project 的 `.unity-agent/config.json`。
+3. 当前 project 的 `.unity-agent/config.local.jsonc`。
+4. 当前 project 的 `.unity-agent/config.jsonc`。
 5. 内置默认值。
 
 日常命令不再要求 `--project`：
@@ -231,7 +239,7 @@ unityctl --project /Users/elex-mb0203/ELEX/Flame/u3dclient status
 ### 初始化
 
 ```bash
-unityctl init --unity "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app" --port 17891
+unityctl init
 ```
 
 ### 配置查看
@@ -249,16 +257,44 @@ unityctl config show
   "unityVersion": "2022.3.62f2",
   "unityExecutablePath": "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity",
   "sources": {
-    "projectConfig": "/Users/example/Game/.unity-agent/config.json",
-    "localConfig": "/Users/example/Game/.unity-agent/config.local.json"
+    "projectConfig": "/Users/example/Game/.unity-agent/config.jsonc",
+    "localConfig": "/Users/example/Game/.unity-agent/config.local.jsonc"
   }
+}
+```
+
+### 配置校验
+
+`unityctl init` 不因为未填写本机 Unity 路径而阻塞。用户后补配置后，可以运行：
+
+```bash
+unityctl config validate
+```
+
+校验命令输出 JSON，报告缺失项、格式错误和建议项：
+
+```json
+{
+  "ok": false,
+  "errors": [
+    {
+      "field": "config.local.unityExecutablePath",
+      "message": "必填：用于 unityctl start 启动 Unity"
+    }
+  ],
+  "warnings": [
+    {
+      "field": "config.unityVersion",
+      "message": "未填写 Unity 版本，无法做版本提示"
+    }
+  ]
 }
 ```
 
 ### 本机配置更新
 
 ```bash
-unityctl config set-local unityAppPath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"
+unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
 ```
 
 ### 启动
@@ -273,7 +309,7 @@ unityctl start
 unityctl start-editor --unity "$effective_unity_executable_path" --project "$effective_project_path"
 ```
 
-其中 `effective_unity_executable_path` 来自 `config.local.json` 的 `unityAppPath` 归一化结果，`effective_project_path` 来自当前发现到的 Unity project root。后续可以保留 `start-editor` 作为低层命令，但用户文档优先使用 `start`。
+其中 `effective_unity_executable_path` 来自 `config.local.jsonc` 的 `unityExecutablePath` 归一化结果，`effective_project_path` 来自当前发现到的 Unity project root。后续可以保留 `start-editor` 作为低层命令，但用户文档优先使用 `start`。
 
 ### 运行观测
 
@@ -341,22 +377,22 @@ unityctl play --session login-flow
 建议提交：
 
 ```text
-.unity-agent/config.json
+.unity-agent/config.jsonc
 .unity-agent/log-rules.json
 ```
 
 建议 ignore：
 
 ```text
-.unity-agent/config.local.json
+.unity-agent/config.local.jsonc
 .unity-agent/sessions/
 ```
 
 原因：
 
-- `config.json` 记录项目级协议和 Bridge port，是团队共享事实。
+- `config.jsonc` 记录项目级协议和 Bridge port，是团队共享事实。
 - `log-rules.json` 记录项目认可的预期日志过滤规则，应该团队共享。
-- `config.local.json` 包含本机路径，不应该提交。
+- `config.local.jsonc` 包含本机路径，不应该提交。
 - `sessions/` 是运行产物，不应该提交。
 
 `unityctl init` 不应强行覆盖已有 ignore 内容，只追加缺失行。
@@ -366,8 +402,8 @@ unityctl play --session login-flow
 常见错误应给出直接可执行的下一步：
 
 - 找不到 Unity project root：提示在 Unity project 下运行，或传 `--project`。
-- 找不到 `config.json`：提示运行 `unityctl init`。
-- 找不到 Unity 安装路径：提示运行 `unityctl config set-local unityAppPath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app"`。
+- 找不到 `config.jsonc`：提示运行 `unityctl init`。
+- 找不到 Unity 安装路径：提示运行 `unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"`。
 - Bridge 连接失败：展示目标 Bridge URL，提示确认 Unity Editor 是否启动、port 是否匹配。
 - Port 被占用：提示换一个 `bridge.port` 后重启 Unity Editor。
 
@@ -378,7 +414,7 @@ unityctl play --session login-flow
   "ok": false,
   "error": "Unity bridge is not reachable",
   "bridgeUrl": "http://127.0.0.1:17891",
-  "hint": "Run unityctl start or check .unity-agent/config.json bridge.port"
+  "hint": "Run unityctl start or check .unity-agent/config.jsonc bridge.port"
 }
 ```
 
@@ -399,7 +435,7 @@ unityctl play --session login-flow
 
 1. `unityctl init` 是否默认生成 `bridge.port = 17890`，还是发现占用时自动挑选空闲端口。
 2. `unityctl start` 是否应该等待 Bridge ready 后才返回。
-3. `config.json` 是否需要 schema，并放入当前仓库 `schemas/`。
+3. `config.jsonc` 是否需要 schema，并放入当前仓库 `schemas/`。
 4. `summary --latest` 的 latest 是否只按 session id 时间戳排序，还是读取 `session.json.createdAt`。
 
 建议第一版选择：

@@ -152,14 +152,7 @@ def test_init_command_writes_project_and_local_config(tmp_path, capsys):
             "--project",
             str(project),
             "init",
-            "--unity",
-            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app",
-            "--unity-version",
-            "2022.3.62f2",
-            "--port",
-            "17891",
-            "--scene",
-            "Assets/Scenes/Login.unity",
+            "--yes",
         ]
     )
 
@@ -167,10 +160,21 @@ def test_init_command_writes_project_and_local_config(tmp_path, capsys):
     output = json.loads(capsys.readouterr().out)
     assert output["ok"] is True
     assert output["projectPath"] == str(project)
-    assert output["bridgeUrl"] == "http://127.0.0.1:17891"
-    assert (project / ".unity-agent" / "config.json").exists()
-    assert (project / ".unity-agent" / "config.local.json").exists()
-    assert ".unity-agent/config.local.json" in (project / ".gitignore").read_text()
+    assert output["alreadyInitialized"] is False
+    assert (project / ".unity-agent" / "config.jsonc").exists()
+    assert (project / ".unity-agent" / "config.local.jsonc").exists()
+    assert ".unity-agent/config.local.jsonc" in (project / ".gitignore").read_text()
+
+
+def test_init_command_requires_confirmation_when_not_yes(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    exit_code = cli.main(["--project", str(project), "init"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert "需要确认" in output["error"]
+    assert not (project / ".unity-agent").exists()
 
 
 def test_config_show_prints_effective_config(tmp_path, capsys):
@@ -180,8 +184,9 @@ def test_config_show_prints_effective_config(tmp_path, capsys):
             "--project",
             str(project),
             "init",
+            "--yes",
             "--unity",
-            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app",
+            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity",
             "--unity-version",
             "2022.3.62f2",
             "--port",
@@ -202,7 +207,7 @@ def test_config_show_prints_effective_config(tmp_path, capsys):
 
 def test_config_set_local_updates_local_config(tmp_path, capsys):
     project = make_unity_project(tmp_path / "Game")
-    cli.main(["--project", str(project), "init", "--unity-version", "2022.3.62f2"])
+    cli.main(["--project", str(project), "init", "--yes"])
     capsys.readouterr()
 
     exit_code = cli.main(
@@ -211,15 +216,28 @@ def test_config_set_local_updates_local_config(tmp_path, capsys):
             str(project),
             "config",
             "set-local",
-            "unityAppPath",
-            "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app",
+            "unityExecutablePath",
+            "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity",
         ]
     )
 
     assert exit_code == 0
     output = json.loads(capsys.readouterr().out)
     assert output["ok"] is True
-    assert output["unityAppPath"] == "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app"
+    assert output["unityExecutablePath"] == "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity"
+
+
+def test_config_validate_reports_missing_local_unity_path(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    cli.main(["--project", str(project), "init", "--yes"])
+    capsys.readouterr()
+
+    exit_code = cli.main(["--project", str(project), "config", "validate"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["errors"][0]["field"] == "config.local.unityExecutablePath"
 
 
 def test_play_with_session_uses_project_config_when_project_flag_is_global(
@@ -232,6 +250,7 @@ def test_play_with_session_uses_project_config_when_project_flag_is_global(
             "--project",
             str(project),
             "init",
+            "--yes",
             "--unity-version",
             "2022.3.62f2",
             "--port",
@@ -288,8 +307,9 @@ def test_start_command_uses_resolved_config(monkeypatch, tmp_path, capsys):
             "--project",
             str(project),
             "init",
+            "--yes",
             "--unity",
-            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app",
+            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity",
             "--unity-version",
             "2022.3.62f2",
         ]
@@ -324,8 +344,9 @@ def test_start_command_waits_for_bridge_by_default(monkeypatch, tmp_path, capsys
             "--project",
             str(project),
             "init",
+            "--yes",
             "--unity",
-            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app",
+            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity",
             "--unity-version",
             "2022.3.62f2",
             "--port",
@@ -359,6 +380,7 @@ def test_stop_latest_updates_latest_session_summary(monkeypatch, tmp_path, capsy
             "--project",
             str(project),
             "init",
+            "--yes",
             "--unity-version",
             "2022.3.62f2",
         ]
