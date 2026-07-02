@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/config.local.schema.json",
+  "title": "Unity Agent Bridge 本机配置",
+  "description": "本机配置，不要提交到 Git。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "指向本 schema 文件的相对路径，供编辑器提供自动补全和校验提示。"
+    },
+    "unityExecutablePath": {
+      "type": ["string", "null"],
+      "description": "本机 Unity 可执行文件路径，用于 unityctl start 启动 Editor。"
+    }
+  }
+}

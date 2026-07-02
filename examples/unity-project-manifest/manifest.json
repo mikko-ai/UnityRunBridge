@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "com.elex.unity-agent-bridge": "file:/absolute/path/to/UnityRunBridge/packages/com.elex.unity-agent-bridge"
+    "com.mk.unity-agent-bridge": "file:/absolute/path/to/UnityRunBridge/packages/com.mk.unity-agent-bridge"
   }
 }

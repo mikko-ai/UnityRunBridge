@@ -39,6 +39,8 @@ def create_session(
     trigger: str,
     task: str,
     created_at: datetime | None = None,
+    editor_pid: int | None = None,
+    unity_version: str | None = None,
 ) -> SessionPaths:
     created = created_at or utc_now()
     project = Path(project_path).expanduser().resolve()
@@ -57,6 +59,9 @@ def create_session(
         "status": "created",
         "trigger": trigger,
         "task": task,
+        "failedReason": None,
+        "editorPid": editor_pid,
+        "unityVersion": unity_version,
     }
 
     session_json_path = session_path / "session.json"
@@ -99,5 +104,18 @@ def update_session_status(
         payload["startedAt"] = started_at
     if ended_at is not None:
         payload["endedAt"] = ended_at
+    write_session_json(session_path, payload)
+    return payload
+
+
+def mark_session_failed(
+    session_path: str | Path,
+    reason: str,
+    ended_at: str | None = None,
+) -> dict[str, Any]:
+    payload = read_session_json(session_path)
+    payload["status"] = "failed"
+    payload["failedReason"] = reason
+    payload["endedAt"] = ended_at or format_time(utc_now())
     write_session_json(session_path, payload)
     return payload

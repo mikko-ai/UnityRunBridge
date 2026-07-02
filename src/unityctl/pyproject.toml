@@ -20,3 +20,6 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["unityctl*"]
+
+[tool.setuptools.package-data]
+unityctl = ["schemas/*.json"]

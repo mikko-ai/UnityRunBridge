@@ -8,5 +8,8 @@
   "endedAt": "2026-06-30T18:31:02Z",
   "status": "stopped",
   "trigger": "agent",
-  "task": "verify login flow after code changes"
+  "task": "verify login flow after code changes",
+  "failedReason": null,
+  "editorPid": 12345,
+  "unityVersion": "2022.3.62f2"
 }

@@ -12,5 +12,6 @@
   "lastProblem": null,
   "startedAt": "2026-06-30T18:30:14Z",
   "endedAt": "2026-06-30T18:31:02Z",
-  "durationMs": 48000
+  "durationMs": 48000,
+  "failedReason": null
 }

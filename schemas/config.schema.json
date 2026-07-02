@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/config.schema.json",
+  "title": "Unity Agent Bridge 项目配置",
+  "description": "项目级配置，建议提交到 Git。纯 JSON，不支持注释；version 是配置结构自身的 schema 版本，不做旧版本迁移。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "bridge"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "指向本 schema 文件的相对路径，供编辑器提供自动补全和校验提示。"
+    },
+    "version": {
+      "const": 1,
+      "description": "配置结构自身的 schema 版本，不是 unityctl 或 Unity 的版本。"
+    },
+    "unityVersion": {
+      "type": ["string", "null"],
+      "description": "项目期望使用的 Unity 版本，仅用于提示和校验，不强制。"
+    },
+    "bridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preferredPort"],
+      "properties": {
+        "preferredPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Bridge 期望监听的端口；实际端口可能因被占用而顺延，真实端口以运行时生成的 bridge.json 为准。"
+        }
+      }
+    },
+    "defaultScene": {
+      "type": ["string", "null"],
+      "description": "可选：默认打开或运行的场景路径。"
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "playSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "unityctl play 等待进入 Play Mode 收敛的超时时间（秒）。"
+        },
+        "stopSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "unityctl stop 等待退出 Play Mode 收敛的超时时间（秒）。"
+        },
+        "startEditorSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "unityctl start 等待 Unity Editor 完成握手的超时时间（秒）。"
+        }
+      }
+    }
+  }
+}

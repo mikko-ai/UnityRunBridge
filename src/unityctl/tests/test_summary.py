@@ -115,3 +115,37 @@ def test_ignore_rule_removes_expected_error_from_problem_count(tmp_path):
 
 def test_load_log_rules_returns_empty_ignore_when_file_missing(tmp_path):
     assert load_log_rules(tmp_path) == {"ignore": []}
+
+
+def test_build_summary_propagates_session_level_failure_even_without_log_problems(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps(
+            {
+                "startedAt": "2026-06-30T18:30:12Z",
+                "endedAt": "2026-06-30T18:31:02Z",
+                "status": "failed",
+                "failedReason": "timeout",
+            }
+        ),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        session / "unity-console.jsonl",
+        [
+            {
+                "sequence": 1,
+                "type": "Log",
+                "message": "ready",
+                "playModeFrame": 1,
+                "scenePath": "Assets/A.unity",
+            }
+        ],
+    )
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert summary["status"] == "failed"
+    assert summary["failedReason"] == "timeout"
+    assert summary["hasProblems"] is False

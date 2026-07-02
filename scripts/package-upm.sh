@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PACKAGE_DIR="$REPO_ROOT/packages/com.elex.unity-agent-bridge"
+PACKAGE_DIR="$REPO_ROOT/packages/com.mk.unity-agent-bridge"
 DIST_DIR="${DIST_DIR:-$REPO_ROOT/.tmp/packages}"
 
 if [[ ! -f "$PACKAGE_DIR/package.json" ]]; then
@@ -22,7 +22,7 @@ print(payload["version"])
 PY
 )"
 
-ARCHIVE_NAME="com.elex.unity-agent-bridge-$VERSION.tgz"
+ARCHIVE_NAME="com.mk.unity-agent-bridge-$VERSION.tgz"
 mkdir -p "$DIST_DIR"
 
 echo "打包 Unity UPM package：$ARCHIVE_NAME"
@@ -30,6 +30,6 @@ tar \
   --exclude=".DS_Store" \
   -czf "$DIST_DIR/$ARCHIVE_NAME" \
   -C "$REPO_ROOT/packages" \
-  "com.elex.unity-agent-bridge"
+  "com.mk.unity-agent-bridge"
 
 echo "$DIST_DIR/$ARCHIVE_NAME"

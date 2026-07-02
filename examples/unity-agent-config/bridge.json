@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "port": 17890,
+  "pid": 12345,
+  "token": "f3a1c8b2d4e6470a9c1b3e5f7a9c0d2e",
+  "unityVersion": "2022.3.62f2",
+  "projectPath": "/absolute/path/to/UnityProject",
+  "startedAt": "2026-07-02T09:00:00Z"
+}

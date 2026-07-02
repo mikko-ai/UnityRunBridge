@@ -7,7 +7,7 @@ UNITY_BIN="${UNITY_BIN:-}"
 UNITY_PROJECT="${UNITY_PROJECT:-$REPO_ROOT/.tmp/unity-test-project}"
 RESULTS_PATH="${UNITY_TEST_RESULTS:-$REPO_ROOT/.tmp/test-results/unity-agent-bridge-editmode.xml}"
 LOG_PATH="${UNITY_LOG_FILE:-$REPO_ROOT/.tmp/logs/unity-agent-bridge-editmode.log}"
-PACKAGE_PATH="$REPO_ROOT/packages/com.elex.unity-agent-bridge"
+PACKAGE_PATH="$REPO_ROOT/packages/com.mk.unity-agent-bridge"
 
 if [[ -z "$UNITY_BIN" ]]; then
   echo "请先设置 UNITY_BIN，例如："
@@ -32,11 +32,11 @@ if [[ "$UNITY_PROJECT" == "$REPO_ROOT/.tmp/unity-test-project" ]]; then
   cat > "$UNITY_PROJECT/Packages/manifest.json" <<JSON
 {
   "dependencies": {
-    "com.elex.unity-agent-bridge": "file:$PACKAGE_PATH",
+    "com.mk.unity-agent-bridge": "file:$PACKAGE_PATH",
     "com.unity.test-framework": "1.1.33"
   },
   "testables": [
-    "com.elex.unity-agent-bridge"
+    "com.mk.unity-agent-bridge"
   ]
 }
 JSON

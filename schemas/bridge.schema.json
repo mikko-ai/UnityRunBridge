@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/bridge.schema.json",
+  "title": "Unity Agent Bridge 握手文件",
+  "description": "由 Unity Editor 写入、CLI 读取的握手文件，记录 Bridge 实际监听的端口与鉴权信息。运行时产物，不应提交到 Git，且不能人工编辑。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "port",
+    "pid",
+    "token",
+    "unityVersion",
+    "projectPath",
+    "startedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "bridge.json 结构自身的 schema 版本。"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Bridge 实际绑定的端口，可能因 preferredPort 被占用而顺延。"
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Unity Editor 进程 ID，CLI 用它判断 Editor 是否仍然存活。"
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "本次 Editor 会话的鉴权 token，所有请求需要通过 X-Bridge-Token 请求头携带。"
+    },
+    "unityVersion": {
+      "type": "string",
+      "description": "当前运行的 Unity Editor 版本。"
+    },
+    "projectPath": {
+      "type": "string",
+      "description": "Unity 项目根目录的绝对路径。"
+    },
+    "startedAt": {
+      "$ref": "#/$defs/utcTimestamp"
+    }
+  },
+  "$defs": {
+    "utcTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

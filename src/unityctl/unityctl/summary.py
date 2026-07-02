@@ -57,7 +57,12 @@ def build_summary(
             blocking_problem_count += 1
             last_problem = problem_payload(row, "blocking")
 
-    if blocking_problem_count > 0:
+    session_status = session_payload.get("status")
+    session_failed_reason = session_payload.get("failedReason") if session_status == "failed" else None
+
+    if session_status == "failed":
+        status = "failed"
+    elif blocking_problem_count > 0:
         status = "failed"
     elif problem_count > 0:
         status = "problem_detected"
@@ -82,6 +87,7 @@ def build_summary(
         "startedAt": started_at,
         "endedAt": ended_at,
         "durationMs": duration_ms(started_at, ended_at),
+        "failedReason": session_failed_reason,
     }
 
 

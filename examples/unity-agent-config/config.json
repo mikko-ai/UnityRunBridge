@@ -1,0 +1,14 @@
+{
+  "$schema": "schemas/config.schema.json",
+  "version": 1,
+  "unityVersion": "2022.3.62f2",
+  "bridge": {
+    "preferredPort": 17890
+  },
+  "defaultScene": null,
+  "timeouts": {
+    "playSeconds": 180,
+    "stopSeconds": 60,
+    "startEditorSeconds": 300
+  }
+}
