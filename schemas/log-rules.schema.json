@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elex.example/schemas/unity-agent-bridge/log-rules.schema.json",
+  "title": "Unity Agent Bridge Log Rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ignore"],
+  "properties": {
+    "ignore": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+          },
+          "messageContains": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "anyOf": [
+          {
+            "required": ["type"]
+          },
+          {
+            "required": ["messageContains"]
+          }
+        ]
+      }
+    }
+  }
+}

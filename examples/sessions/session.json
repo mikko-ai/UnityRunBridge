@@ -1,0 +1,12 @@
+{
+  "sessionId": "2026-06-30_183012_login-flow",
+  "name": "login-flow",
+  "projectPath": "/absolute/path/to/unity-project",
+  "scenePath": "Assets/Scenes/Login.unity",
+  "createdAt": "2026-06-30T18:30:12Z",
+  "startedAt": "2026-06-30T18:30:14Z",
+  "endedAt": "2026-06-30T18:31:02Z",
+  "status": "stopped",
+  "trigger": "agent",
+  "task": "verify login flow after code changes"
+}

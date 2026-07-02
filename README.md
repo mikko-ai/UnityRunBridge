@@ -154,6 +154,27 @@ uv run unityctl summary --session-path "<ProjectRoot>/.unity-agent/sessions/<ses
 将 ignore rules 保存到 Unity 项目的 `.unity-agent/log-rules.json`。第一版只支持
 `ignore`，匹配字段为 `type` 和 `messageContains`。
 
+## 数据契约与示例
+
+`schemas/` 固定了落盘文件的数据契约：
+
+```text
+schemas/session.schema.json
+schemas/unity-console-log.schema.json
+schemas/summary.schema.json
+schemas/log-rules.schema.json
+```
+
+`examples/` 提供最小可读样例：
+
+```text
+examples/unity-project-manifest/manifest.json
+examples/log-rules.json
+examples/sessions/session.json
+examples/sessions/unity-console.jsonl
+examples/sessions/summary.json
+```
+
 ## 运行测试
 
 Python 测试：
@@ -161,6 +182,12 @@ Python 测试：
 ```bash
 cd src/unityctl
 uv run pytest tests -v
+```
+
+也可以从仓库根目录运行脚本：
+
+```bash
+scripts/run-python-tests.sh
 ```
 
 Unity EditMode 测试，在仓库根目录下执行：
@@ -179,3 +206,25 @@ mkdir -p "$REPO_ROOT/.tmp/logs" "$REPO_ROOT/.tmp/test-results"
 ```
 
 Unity 测试命令**故意不传** `-quit` 参数；Unity 在测试运行写入结果 XML 后会自动退出。
+
+也可以使用脚本运行。未设置 `UNITY_PROJECT` 时，脚本会使用仓库内
+`.tmp/unity-test-project` 作为临时 Unity project：
+
+```bash
+export UNITY_BIN="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
+scripts/run-unity-editmode-tests.sh
+```
+
+## 打包 UPM
+
+从仓库根目录运行：
+
+```bash
+scripts/package-upm.sh
+```
+
+产物默认写入 `.tmp/packages/`，也可以通过 `DIST_DIR` 指定输出目录：
+
+```bash
+DIST_DIR="$REPO_ROOT/.tmp/release" scripts/package-upm.sh
+```

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elex.example/schemas/unity-agent-bridge/unity-console-log.schema.json",
+  "title": "Unity Agent Bridge Console Log Entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "time",
+    "sequence",
+    "type",
+    "message",
+    "stackTrace",
+    "isPlayMode",
+    "playModeFrame",
+    "scenePath"
+  ],
+  "properties": {
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "type": {
+      "type": "string",
+      "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+    },
+    "message": {
+      "type": "string"
+    },
+    "stackTrace": {
+      "type": "string"
+    },
+    "isPlayMode": {
+      "type": "boolean"
+    },
+    "playModeFrame": {
+      "type": "integer",
+      "minimum": -1
+    },
+    "scenePath": {
+      "type": "string"
+    }
+  }
+}

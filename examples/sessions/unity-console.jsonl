@@ -1,0 +1,2 @@
+{"time":"2026-06-30T18:30:15.001Z","sequence":1,"type":"Log","message":"Unity Agent Bridge listening on http://127.0.0.1:17890/","stackTrace":"","isPlayMode":false,"playModeFrame":-1,"scenePath":"Assets/Scenes/Login.unity"}
+{"time":"2026-06-30T18:30:20.250Z","sequence":2,"type":"Warning","message":"Example warning for agent review","stackTrace":"Example.StackTrace","isPlayMode":true,"playModeFrame":112,"scenePath":"Assets/Scenes/Login.unity"}

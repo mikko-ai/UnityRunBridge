@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "hasProblems": false,
+  "hasBlockingProblems": false,
+  "logCount": 2,
+  "warningCount": 1,
+  "errorCount": 0,
+  "exceptionCount": 0,
+  "assertCount": 0,
+  "ignoredProblemCount": 0,
+  "blockingProblemCount": 0,
+  "lastProblem": null,
+  "startedAt": "2026-06-30T18:30:14Z",
+  "endedAt": "2026-06-30T18:31:02Z",
+  "durationMs": 48000
+}

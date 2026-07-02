@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elex.example/schemas/unity-agent-bridge/summary.schema.json",
+  "title": "Unity Agent Bridge Session Summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "hasProblems",
+    "hasBlockingProblems",
+    "logCount",
+    "warningCount",
+    "errorCount",
+    "exceptionCount",
+    "assertCount",
+    "ignoredProblemCount",
+    "blockingProblemCount",
+    "lastProblem",
+    "startedAt",
+    "endedAt",
+    "durationMs"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["passed", "problem_detected", "failed"]
+    },
+    "hasProblems": {
+      "type": "boolean"
+    },
+    "hasBlockingProblems": {
+      "type": "boolean"
+    },
+    "logCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warningCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errorCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "exceptionCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "assertCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ignoredProblemCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "blockingProblemCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lastProblem": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/problem"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "startedAt": {
+      "type": ["string", "null"]
+    },
+    "endedAt": {
+      "type": ["string", "null"]
+    },
+    "durationMs": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "message",
+        "severity",
+        "sequence",
+        "playModeFrame",
+        "scenePath"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["Error", "Exception", "Assert"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["problem", "blocking"]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "playModeFrame": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "scenePath": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "ignore": [
+    {
+      "type": "Error",
+      "messageContains": "Expected test error"
+    }
+  ]
+}
