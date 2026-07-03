@@ -1,6 +1,6 @@
 {
   "name": "com.mk.unity-agent-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "displayName": "Unity Agent Bridge",
   "description": "Editor-only localhost bridge for controlling Unity PlayMode from external agent tools.",
   "unity": "2021.3",
