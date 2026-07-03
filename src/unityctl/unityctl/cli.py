@@ -10,9 +10,11 @@ from unityctl.client import BridgeClient, BridgeClientError
 from unityctl.config import (
     ConfigError,
     UNITY_AGENT_BRIDGE_PACKAGE_ID,
+    default_bridge_package_ref,
     find_latest_session_path,
     find_unity_project_root,
     init_project_config,
+    install_bridge_package,
     is_bridge_package_installed,
     read_json,
     resolve_effective_config,
@@ -117,7 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     init = subparsers.add_parser(
         "init",
         help="初始化 .unity-agent 配置目录",
-        description="在 Unity 项目根目录创建 .unity-agent/config.json、config.local.json 和 schema 文件。",
+        description=(
+            "在 Unity 项目根目录创建 .unity-agent/config.json、config.local.json 和 schema 文件。"
+            "同时检测 Packages/manifest.json 是否包含 bridge 包依赖；"
+            "缺失时在交互终端中询问是否写入，或使用 --install-package 直接写入。"
+        ),
         formatter_class=_HelpFormatter,
     )
     init.add_argument(
@@ -149,6 +155,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="重新生成缺失的配置文件（不覆盖已有 config.json / config.local.json）",
+    )
+    package_group = init.add_mutually_exclusive_group()
+    package_group.add_argument(
+        "--install-package",
+        action="store_true",
+        help="若 Packages/manifest.json 缺少 bridge 包依赖，直接写入（不询问）",
+    )
+    package_group.add_argument(
+        "--no-install-package",
+        action="store_true",
+        help="跳过 Packages/manifest.json 依赖检测与写入",
+    )
+    init.add_argument(
+        "--package-ref",
+        metavar="REF",
+        help=(
+            "写入 manifest 的依赖引用，例如 git URL 或 file: 路径"
+            "（默认指向与 unityctl 版本一致的 upm tag）"
+        ),
     )
 
     config = subparsers.add_parser(
@@ -425,6 +450,28 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
         default_scene=args.default_scene,
         force=args.force,
     )
+
+    package_ref = args.package_ref or default_bridge_package_ref(__version__)
+    package_action, package_installed = _handle_bridge_package_install(
+        project=result.project_path,
+        package_ref=package_ref,
+        install=args.install_package,
+        skip=args.no_install_package,
+        assume_yes=args.yes,
+    )
+
+    next_steps = [
+        "Edit .unity-agent/config.local.json and set unityExecutablePath",
+        "Run unityctl config validate",
+        "Run unityctl start",
+    ]
+    if not package_installed:
+        next_steps.insert(
+            0,
+            f"Add {UNITY_AGENT_BRIDGE_PACKAGE_ID} to Packages/manifest.json "
+            "(or rerun unityctl init --install-package)",
+        )
+
     return {
         "ok": True,
         "code": "ok",
@@ -432,17 +479,42 @@ def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
         "configPath": str(result.config_path),
         "localConfigPath": str(result.local_config_path),
         "preferredPort": result.preferred_port,
-        "packageInstalled": result.package_installed,
+        "packageInstalled": package_installed,
+        "packageAction": package_action,
+        "packageRef": package_ref if package_action == "installed" else None,
         "alreadyInitialized": bool(result.kept_paths),
         "createdPaths": [str(path) for path in result.created_paths],
         "keptPaths": [str(path) for path in result.kept_paths],
         "updatedIgnore": result.updated_ignore,
-        "nextSteps": [
-            "Edit .unity-agent/config.local.json and set unityExecutablePath",
-            "Run unityctl config validate",
-            "Run unityctl start",
-        ],
+        "nextSteps": next_steps,
     }
+
+
+def _handle_bridge_package_install(
+    project: Path,
+    package_ref: str,
+    install: bool,
+    skip: bool,
+    assume_yes: bool,
+) -> tuple[str, bool]:
+    """检测 Packages/manifest.json 中的 bridge 包依赖，按需写入。
+
+    返回 (packageAction, packageInstalled)。packageAction 取值：
+    already_installed / installed / declined / skipped。
+    """
+    if is_bridge_package_installed(project):
+        return "already_installed", True
+    if skip:
+        return "skipped", False
+    if not install:
+        # 未显式指定时：交互终端里询问用户；非交互（含 --yes）不擅自改 manifest。
+        if assume_yes or not sys.stdin.isatty():
+            return "skipped", False
+        if not confirm_install_package(project, package_ref):
+            return "declined", False
+    manifest_path = install_bridge_package(project, package_ref)
+    print(f"已写入 {manifest_path}", file=sys.stderr)
+    return "installed", True
 
 
 def cmd_config(args: argparse.Namespace) -> dict[str, Any]:
@@ -994,6 +1066,17 @@ def confirm_init(project_path: Path, force: bool = False) -> None:
     answer = input("是否继续？[y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("用户取消 init")
+
+
+def confirm_install_package(project_path: Path, package_ref: str) -> bool:
+    print(
+        f"检测到 {project_path / 'Packages' / 'manifest.json'} 中缺少 "
+        f"{UNITY_AGENT_BRIDGE_PACKAGE_ID} 依赖。",
+        file=sys.stderr,
+    )
+    print(f"将写入引用：{package_ref}", file=sys.stderr)
+    answer = input("是否写入 Packages/manifest.json？[y/N] ").strip().lower()
+    return answer in {"y", "yes"}
 
 
 def resolve_session_path(args: argparse.Namespace, project_path: Path) -> Path:

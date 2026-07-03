@@ -18,6 +18,7 @@ DEFAULT_STOP_TIMEOUT_SECONDS = 60
 DEFAULT_START_EDITOR_TIMEOUT_SECONDS = 300
 
 UNITY_AGENT_BRIDGE_PACKAGE_ID = "com.mk.unity-agent-bridge"
+UNITY_AGENT_BRIDGE_GIT_URL = "https://github.com/mikko-ai/UnityRunBridge.git"
 
 SCHEMA_SOURCE_DIR = Path(__file__).parent / "schemas"
 SCHEMA_FILENAMES = (
@@ -275,6 +276,24 @@ def is_bridge_package_installed(project_path: str | Path) -> bool:
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     dependencies = payload.get("dependencies", {})
     return UNITY_AGENT_BRIDGE_PACKAGE_ID in dependencies
+
+
+def default_bridge_package_ref(version: str) -> str:
+    """默认写入 manifest 的依赖引用：指向与 CLI 版本一致的 upm tag。
+
+    发布脚本保证 UPM 包版本与 unityctl 版本同步，因此可以直接复用 __version__。
+    """
+    return f"{UNITY_AGENT_BRIDGE_GIT_URL}#upm/v{version}"
+
+
+def install_bridge_package(project_path: str | Path, ref: str) -> Path:
+    """把 bridge 包依赖写入 Packages/manifest.json，保留其他已有内容。"""
+    manifest = Path(project_path) / "Packages" / "manifest.json"
+    payload = read_json(manifest)
+    dependencies = payload.setdefault("dependencies", {})
+    dependencies[UNITY_AGENT_BRIDGE_PACKAGE_ID] = ref
+    write_json(manifest, payload)
+    return manifest
 
 
 def find_latest_session_path(project_path: str | Path) -> Path:

@@ -21,7 +21,7 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 
 ## 添加 Unity 包
 
-将包添加到 Unity 项目的 `Packages/manifest.json` 中。
+将包添加到 Unity 项目的 `Packages/manifest.json` 中。推荐直接使用 `unityctl init`：它会检测 manifest 是否已包含 bridge 包依赖，缺失时询问是否写入（详见下文「初始化 Unity Project」）。也可以按以下方式手动添加。
 
 ### 正式引用（推荐）
 
@@ -137,6 +137,20 @@ unityctl init
 ```
 
 如果已经初始化，`init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，应被 `.gitignore` 忽略。
+
+`init` 还会检测 `Packages/manifest.json` 是否已包含 `com.mk.unity-agent-bridge` 依赖：
+
+- 已存在：保持不动，输出 `"packageAction": "already_installed"`。
+- 缺失且在交互终端中：询问是否写入，同意后写入依赖（默认引用与 CLI 版本一致的 `upm/vX.Y.Z` tag）。
+- 缺失且非交互（含 `--yes`）：默认不修改 manifest，仅在 `nextSteps` 中提示。
+
+相关参数：
+
+```bash
+unityctl init --install-package                 # 缺失时直接写入，不询问（适合脚本/CI，可与 --yes 组合）
+unityctl init --no-install-package              # 跳过 manifest 检测与写入
+unityctl init --install-package --package-ref "file:/absolute/path/to/pkg.tgz"  # 自定义依赖引用
+```
 
 配置文件是纯 JSON，不支持注释；字段说明见 `.unity-agent/schemas/config.schema.json` 和 `config.local.schema.json`。
 

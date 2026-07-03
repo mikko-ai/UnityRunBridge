@@ -440,6 +440,149 @@ def test_init_command_writes_project_and_local_config(tmp_path, capsys):
     assert ".unity-agent/config.local.json" in (project / ".gitignore").read_text()
 
 
+def test_init_yes_skips_package_install_without_flag(tmp_path, capsys):
+    """--yes 非交互模式下不应擅自修改 manifest，只提示后续步骤。"""
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text('{"dependencies": {}}', encoding="utf-8")
+
+    exit_code = cli.main(["--project", str(project), "init", "--yes"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageInstalled"] is False
+    assert output["packageAction"] == "skipped"
+    assert "com.mk.unity-agent-bridge" not in manifest.read_text(encoding="utf-8")
+    assert any("manifest.json" in step for step in output["nextSteps"])
+
+
+def test_init_install_package_writes_manifest_dependency(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text(
+        json.dumps({"dependencies": {"com.unity.ugui": "1.0.0"}}), encoding="utf-8"
+    )
+
+    exit_code = cli.main(
+        ["--project", str(project), "init", "--yes", "--install-package"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageInstalled"] is True
+    assert output["packageAction"] == "installed"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    # 已有依赖保留，新增 bridge 依赖指向与 CLI 版本一致的 upm tag
+    assert payload["dependencies"]["com.unity.ugui"] == "1.0.0"
+    assert (
+        payload["dependencies"]["com.mk.unity-agent-bridge"]
+        == f"https://github.com/mikko-ai/UnityRunBridge.git#upm/v{__version__}"
+    )
+    assert output["packageRef"] == payload["dependencies"]["com.mk.unity-agent-bridge"]
+
+
+def test_init_install_package_respects_custom_ref(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text('{"dependencies": {}}', encoding="utf-8")
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(project),
+            "init",
+            "--yes",
+            "--install-package",
+            "--package-ref",
+            "file:/tmp/com.mk.unity-agent-bridge-0.1.2.tgz",
+        ]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert (
+        payload["dependencies"]["com.mk.unity-agent-bridge"]
+        == "file:/tmp/com.mk.unity-agent-bridge-0.1.2.tgz"
+    )
+    assert output["packageAction"] == "installed"
+
+
+def test_init_reports_already_installed_package(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {"dependencies": {"com.mk.unity-agent-bridge": "file:/existing/path"}}
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = cli.main(
+        ["--project", str(project), "init", "--yes", "--install-package"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageInstalled"] is True
+    assert output["packageAction"] == "already_installed"
+    # 已有引用不被覆盖
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["dependencies"]["com.mk.unity-agent-bridge"] == "file:/existing/path"
+
+
+def test_init_no_install_package_skips_manifest(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text('{"dependencies": {}}', encoding="utf-8")
+
+    exit_code = cli.main(
+        ["--project", str(project), "init", "--yes", "--no-install-package"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageAction"] == "skipped"
+    assert "com.mk.unity-agent-bridge" not in manifest.read_text(encoding="utf-8")
+
+
+def test_init_interactive_prompt_installs_on_consent(monkeypatch, tmp_path, capsys):
+    """交互模式下缺依赖时询问用户，同意后写入 manifest。"""
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text('{"dependencies": {}}', encoding="utf-8")
+
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    answers = iter(["y", "y"])  # 第一次确认 init，第二次确认写入 manifest
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    exit_code = cli.main(["--project", str(project), "init"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageAction"] == "installed"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert "com.mk.unity-agent-bridge" in payload["dependencies"]
+
+
+def test_init_interactive_prompt_declined_leaves_manifest(monkeypatch, tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages" / "manifest.json"
+    manifest.write_text('{"dependencies": {}}', encoding="utf-8")
+
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    answers = iter(["y", "n"])  # 同意 init，拒绝写入 manifest
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    exit_code = cli.main(["--project", str(project), "init"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["packageAction"] == "declined"
+    assert output["packageInstalled"] is False
+    assert "com.mk.unity-agent-bridge" not in manifest.read_text(encoding="utf-8")
+
+
 def test_init_command_requires_confirmation_when_not_yes(tmp_path, capsys):
     project = make_unity_project(tmp_path / "Game")
 
