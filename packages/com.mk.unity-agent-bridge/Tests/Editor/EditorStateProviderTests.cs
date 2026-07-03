@@ -11,7 +11,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests
 
             Assert.IsTrue(status.ok);
             Assert.AreEqual("ok", status.code);
-            Assert.AreEqual("0.1.0", status.bridgeVersion);
+            Assert.AreEqual(BridgeConfig.Version, status.bridgeVersion);
             Assert.IsNotEmpty(status.unityVersion);
             Assert.IsNotNull(status.activeScenePath);
             Assert.IsNotNull(status.editorState);

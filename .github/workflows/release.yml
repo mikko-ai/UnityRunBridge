@@ -1,4 +1,4 @@
-name: Release UPM
+name: Release
 
 on:
   push:
@@ -17,17 +17,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate version
+      - name: Validate release
         id: version
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PACKAGE_VERSION="$(python3 -c "import json; print(json.load(open('packages/com.mk.unity-agent-bridge/package.json'))['version'])")"
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Tag version (v${TAG_VERSION}) does not match package.json version (${PACKAGE_VERSION})"
-            exit 1
-          fi
-          echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Validated version: ${TAG_VERSION}"
+        run: bash .github/scripts/validate-release.sh
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run Python tests
+        run: bash scripts/run-python-tests.sh
 
       - name: Configure git
         run: |
@@ -52,18 +52,15 @@ jobs:
           fi
           echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
 
+      - name: Build Python wheel and sdist
+        id: python
+        run: bash .github/scripts/package-python.sh
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            # Release 已存在（重跑场景），只补传/覆盖附件
-            gh release upload "${{ github.ref_name }}" \
-              --clobber \
-              "${{ steps.package.outputs.archive_path }}"
-          else
-            gh release create "${{ github.ref_name }}" \
-              --title "${{ github.ref_name }}" \
-              --generate-notes \
-              "${{ steps.package.outputs.archive_path }}"
-          fi
+        run: >
+          bash .github/scripts/create-github-release.sh
+          "${{ steps.package.outputs.archive_path }}"
+          "${{ steps.python.outputs.wheel_path }}"
+          "${{ steps.python.outputs.sdist_path }}"

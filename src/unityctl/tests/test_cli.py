@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from unityctl import __version__
 from unityctl import cli
 from unityctl.convergence import ConvergenceResult
 from unityctl.discovery import BridgeInfo
@@ -110,6 +113,14 @@ def patch_poll_until_success(monkeypatch, statuses):
         return ConvergenceResult(status=status, info=initial_info)
 
     monkeypatch.setattr(cli, "poll_until", fake_poll_until)
+
+
+def test_version_flag(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--version"])
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out.strip() == f"unityctl {__version__}"
 
 
 def test_status_command_prints_json(monkeypatch, tmp_path, capsys):

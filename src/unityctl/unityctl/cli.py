@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from unityctl import __version__
 from unityctl.client import BridgeClient, BridgeClientError
 from unityctl.config import (
     ConfigError,
@@ -53,6 +54,7 @@ class CliError(RuntimeError):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="unityctl")
+    parser.add_argument("--version", action="version", version=f"unityctl {__version__}")
     parser.add_argument("--project", dest="global_project_path")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

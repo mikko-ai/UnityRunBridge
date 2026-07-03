@@ -30,12 +30,12 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 ```json
 {
   "dependencies": {
-    "com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/v0.1.0"
+    "com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/vX.Y.Z"
   }
 }
 ```
 
-将 `upm/v0.1.0` 替换为需要的版本 tag。该包仅在 Editor 下运行，并在 Unity Editor 加载时启动本地桥接服务。
+将 `upm/vX.Y.Z` 替换为需要的版本 tag（例如 `upm/v0.1.0`）。该包仅在 Editor 下运行，并在 Unity Editor 加载时启动本地桥接服务。
 
 ### 本地开发
 
@@ -52,6 +52,22 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 请使用本仓库在你机器上的绝对路径。
 
 ## 安装 CLI
+
+### 从 GitHub Release 安装（正式）
+
+在 [GitHub Releases](https://github.com/mikko-ai/UnityRunBridge/releases) 页面找到对应版本，使用 wheel 安装：
+
+```bash
+uv tool install --force https://github.com/mikko-ai/UnityRunBridge/releases/download/vX.Y.Z/unity_run_bridge-X.Y.Z-py3-none-any.whl
+```
+
+将 `vX.Y.Z` 和 wheel 文件名替换为实际版本。安装后验证：
+
+```bash
+unityctl --version
+```
+
+### 本地开发安装
 
 本地开发安装：
 
@@ -272,6 +288,27 @@ export UNITY_BIN="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/
 scripts/run-unity-editmode-tests.sh
 ```
 
+## 本地模拟正式安装
+
+在发布前验证 Release 产物安装路径：
+
+```bash
+scripts/install-local.sh
+```
+
+可选传入 Unity 项目路径，脚本会把 manifest 依赖改为 `file:<tgz绝对路径>`：
+
+```bash
+scripts/install-local.sh /absolute/path/to/UnityProject
+```
+
+脚本会：
+
+1. 打包 UPM `.tgz` 到 `.tmp/packages/`
+2. 构建 Python wheel
+3. 用 `uv tool install --force <wheel>` 安装 CLI
+4. 打印 `unityctl --version` 验证结果
+
 ## 打包 UPM
 
 从仓库根目录运行：
@@ -288,22 +325,25 @@ DIST_DIR="$REPO_ROOT/.tmp/release" scripts/package-upm.sh
 
 ### 发布流程
 
-1. 更新 [packages/com.mk.unity-agent-bridge/package.json](packages/com.mk.unity-agent-bridge/package.json) 中的 `version`。
-2. 合并到 `main` 分支。
-3. 打 tag 并推送：
+1. 在 `main` 分支执行版本升级脚本（会同步更新 Unity 包与 Python 工具版本、commit 并打 tag）：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+scripts/bump-version.sh patch
+# 或 minor / major
+# 仅本地完成、不 push：scripts/bump-version.sh patch --no-push
 ```
 
-4. GitHub Actions 会自动：
-   - 校验 tag 版本与 `package.json` 一致
+2. 脚本默认 push `main` 与 `vX.Y.Z` tag；GitHub Actions 会自动：
+   - 校验 tag 位于 `main` 历史上
+   - 校验 tag 与 `package.json` / `pyproject.toml` / `__init__.py` 版本一致
+   - 运行 Python 测试
    - 将包切出到 `upm` 分支，并创建 `upm/vX.Y.Z` tag
-   - 创建 GitHub Release，附带 `.tgz` 产物
+   - 创建 GitHub Release，附带 UPM `.tgz`、Python wheel 与 sdist
 
 发布后，Unity 项目可通过以下方式引用：
 
 ```json
-"com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/v0.1.0"
+"com.mk.unity-agent-bridge": "https://github.com/mikko-ai/UnityRunBridge.git#upm/vX.Y.Z"
 ```
+
+Python CLI 可从同一 Release 的 wheel 安装（见上文「从 GitHub Release 安装」）。
