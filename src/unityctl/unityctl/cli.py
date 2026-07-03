@@ -52,86 +52,322 @@ class CliError(RuntimeError):
         self.extra = extra or {}
 
 
+class _HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    pass
+
+
+def _add_project_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--project",
+        dest="project_path",
+        metavar="PATH",
+        help="Unity 项目根目录（默认从当前目录向上查找）",
+    )
+
+
+def _add_session_options(parser: argparse.ArgumentParser) -> None:
+    session = parser.add_mutually_exclusive_group(required=True)
+    session.add_argument(
+        "--session-path",
+        metavar="PATH",
+        help="session 目录的绝对路径（.unity-agent/sessions/<sessionId>/）",
+    )
+    session.add_argument(
+        "--latest",
+        action="store_true",
+        help="使用最近创建的 session",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="unityctl")
+    parser = argparse.ArgumentParser(
+        prog="unityctl",
+        description=(
+            "通过 Unity Agent Bridge 控制 Unity Editor 的 CLI 工具。"
+            "所有命令以 JSON 输出到 stdout；失败时 stderr 输出 {\"ok\": false, ...}。"
+        ),
+        epilog=(
+            "示例:\n"
+            "  unityctl init --yes\n"
+            "  unityctl config validate\n"
+            "  unityctl start\n"
+            "  unityctl play --session login-flow --scene Assets/Scenes/Login.unity\n"
+            "  unityctl stop --latest\n"
+            "  unityctl doctor\n"
+            "\n"
+            "使用 unityctl <命令> --help 查看单个命令的详细参数。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"unityctl {__version__}")
-    parser.add_argument("--project", dest="global_project_path")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--project",
+        dest="global_project_path",
+        metavar="PATH",
+        help="Unity 项目根目录；可作为各子命令 --project 的全局默认值",
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="命令",
+        metavar="COMMAND",
+    )
 
-    init = subparsers.add_parser("init")
-    init.add_argument("--unity", dest="unity_path")
-    init.add_argument("--unity-version")
-    init.add_argument("--port", dest="preferred_port", type=int, default=17890)
-    init.add_argument("--scene", dest="default_scene")
-    init.add_argument("--yes", action="store_true")
-    init.add_argument("--force", action="store_true")
+    init = subparsers.add_parser(
+        "init",
+        help="初始化 .unity-agent 配置目录",
+        description="在 Unity 项目根目录创建 .unity-agent/config.json、config.local.json 和 schema 文件。",
+        formatter_class=_HelpFormatter,
+    )
+    init.add_argument(
+        "--unity",
+        dest="unity_path",
+        metavar="PATH",
+        help="Unity 可执行文件路径（写入 config.local.json）",
+    )
+    init.add_argument("--unity-version", help="Unity 版本号（写入 config.json）")
+    init.add_argument(
+        "--port",
+        dest="preferred_port",
+        type=int,
+        default=17890,
+        help="Bridge 期望监听端口",
+    )
+    init.add_argument(
+        "--scene",
+        dest="default_scene",
+        metavar="PATH",
+        help="默认场景路径，例如 Assets/Scenes/Main.unity",
+    )
+    init.add_argument(
+        "--yes",
+        action="store_true",
+        help="跳过交互确认（脚本/CI 使用）",
+    )
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="重新生成缺失的配置文件（不覆盖已有 config.json / config.local.json）",
+    )
 
-    config = subparsers.add_parser("config")
-    config.add_argument("--project", dest="project_path")
-    config_subparsers = config.add_subparsers(dest="config_command", required=True)
-    config_subparsers.add_parser("show")
-    config_subparsers.add_parser("validate")
-    set_local = config_subparsers.add_parser("set-local")
-    set_local.add_argument("key")
-    set_local.add_argument("value")
+    config = subparsers.add_parser(
+        "config",
+        help="查看或校验项目配置",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(config)
+    config_subparsers = config.add_subparsers(
+        dest="config_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    config_subparsers.add_parser(
+        "show",
+        help="输出合并后的有效配置（项目配置 + 本机配置）",
+        formatter_class=_HelpFormatter,
+    )
+    config_subparsers.add_parser(
+        "validate",
+        help="校验 config.json 与 config.local.json",
+        formatter_class=_HelpFormatter,
+    )
+    set_local = config_subparsers.add_parser(
+        "set-local",
+        help="更新 config.local.json 中的单个字段",
+        formatter_class=_HelpFormatter,
+    )
+    set_local.add_argument(
+        "key",
+        help="字段名，例如 unityExecutablePath",
+    )
+    set_local.add_argument(
+        "value",
+        help="字段值",
+    )
 
-    status = subparsers.add_parser("status")
-    status.add_argument("--project", dest="project_path")
+    status = subparsers.add_parser(
+        "status",
+        help="查询 Unity Editor 当前状态",
+        description="通过 Bridge 获取 editorState、编译结果、当前场景等信息。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(status)
 
-    play = subparsers.add_parser("play")
-    play.add_argument("--project", dest="project_path")
-    play.add_argument("--session", dest="session_name")
-    play.add_argument("--scene", dest="scene_path")
-    play.add_argument("--task", default="")
-    play.add_argument("--trigger", default="agent")
-    play.add_argument("--timeout", type=float, default=None)
-    play.add_argument("--no-wait", action="store_true")
+    play = subparsers.add_parser(
+        "play",
+        help="进入 Play Mode",
+        description=(
+            "可选打开场景并创建 session 记录运行日志。"
+            "默认等待进入 Play Mode；若存在编译错误则失败。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(play)
+    play.add_argument(
+        "--session",
+        dest="session_name",
+        metavar="NAME",
+        help="创建 session 并记录 unity-console.jsonl（位于 .unity-agent/sessions/）",
+    )
+    play.add_argument(
+        "--scene",
+        dest="scene_path",
+        metavar="PATH",
+        help="进入 Play Mode 前打开的场景路径",
+    )
+    play.add_argument("--task", default="", help="session 任务描述（写入 session.json）")
+    play.add_argument(
+        "--trigger",
+        default="agent",
+        help="session 触发来源（写入 session.json）",
+    )
+    play.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待收敛的超时秒数（默认读取 config.json 中的 playSeconds）",
+    )
+    play.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="发送 play 请求后立即返回，不等待进入 Play Mode",
+    )
 
-    stop = subparsers.add_parser("stop")
-    stop.add_argument("--project", dest="project_path")
-    stop.add_argument("--session-path")
-    stop.add_argument("--latest", action="store_true")
-    stop.add_argument("--timeout", type=float, default=None)
-    stop.add_argument("--no-wait", action="store_true")
+    stop = subparsers.add_parser(
+        "stop",
+        help="退出 Play Mode",
+        description="可选关联 session：退出后生成 summary.json。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(stop)
+    stop.add_argument(
+        "--session-path",
+        metavar="PATH",
+        help="关联的 session 目录；与 --latest 二选一",
+    )
+    stop.add_argument(
+        "--latest",
+        action="store_true",
+        help="关联最近创建的 session",
+    )
+    stop.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待退出 Play Mode 的超时秒数（默认读取 config.json 中的 stopSeconds）",
+    )
+    stop.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="发送 stop 请求后立即返回，不等待 Editor 回到 idle",
+    )
 
-    pause = subparsers.add_parser("pause")
-    pause.add_argument("--project", dest="project_path")
+    pause = subparsers.add_parser(
+        "pause",
+        help="暂停 Play Mode",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(pause)
 
-    resume = subparsers.add_parser("resume")
-    resume.add_argument("--project", dest="project_path")
+    resume = subparsers.add_parser(
+        "resume",
+        help="恢复 Play Mode",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(resume)
 
-    open_scene = subparsers.add_parser("open-scene")
-    open_scene.add_argument("--project", dest="project_path")
-    open_scene.add_argument("scene_path")
+    open_scene = subparsers.add_parser(
+        "open-scene",
+        help="在 Editor 中打开场景",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(open_scene)
+    open_scene.add_argument(
+        "scene_path",
+        metavar="PATH",
+        help="场景路径，例如 Assets/Scenes/Login.unity",
+    )
 
-    start = subparsers.add_parser("start")
-    start.add_argument("--project", dest="project_path")
-    start.add_argument("--unity", dest="unity_path")
-    start.add_argument("--log-file")
-    start.add_argument("--no-wait", action="store_true")
+    start = subparsers.add_parser(
+        "start",
+        help="启动 Unity Editor 进程",
+        description="默认等待 Bridge 握手完成（写出 bridge.json 并可连接）。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(start)
+    start.add_argument(
+        "--unity",
+        dest="unity_path",
+        metavar="PATH",
+        help="覆盖 config.local.json 中的 Unity 可执行文件路径",
+    )
+    start.add_argument(
+        "--log-file",
+        metavar="PATH",
+        help="Editor 日志文件路径（默认 .unity-agent/unity-editor.log）",
+    )
+    start.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="启动进程后立即返回，不等待 Bridge 握手",
+    )
 
-    logs = subparsers.add_parser("logs")
-    logs.add_argument("--project", dest="project_path")
-    logs.add_argument("--session-path")
-    logs.add_argument("--latest", action="store_true")
-    logs.add_argument("--limit", type=int, default=100)
+    logs = subparsers.add_parser(
+        "logs",
+        help="读取 session 的 Unity 控制台日志",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(logs)
+    _add_session_options(logs)
+    logs.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        metavar="N",
+        help="返回最近的 N 条日志",
+    )
 
-    errors = subparsers.add_parser("errors")
-    errors.add_argument("--project", dest="project_path")
-    errors.add_argument("--session-path")
-    errors.add_argument("--latest", action="store_true")
+    errors = subparsers.add_parser(
+        "errors",
+        help="读取 session 中的错误与阻塞日志",
+        description="按 .unity-agent/log-rules.json 中的 ignore 规则过滤后返回 problem/blocking 级别条目。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(errors)
+    _add_session_options(errors)
 
-    summary = subparsers.add_parser("summary")
-    summary.add_argument("--project", dest="project_path")
-    summary.add_argument("--session-path")
-    summary.add_argument("--latest", action="store_true")
+    summary = subparsers.add_parser(
+        "summary",
+        help="读取 session 的 summary.json",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(summary)
+    _add_session_options(summary)
 
-    refresh = subparsers.add_parser("refresh")
-    refresh.add_argument("--project", dest="project_path")
-    refresh.add_argument("--timeout", type=float, default=None)
+    refresh = subparsers.add_parser(
+        "refresh",
+        help="触发脚本重编译并等待完成",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(refresh)
+    refresh.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待编译完成的超时秒数（默认读取 config.json 中的 playSeconds）",
+    )
 
-    doctor = subparsers.add_parser("doctor")
-    doctor.add_argument("--project", dest="project_path")
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="诊断项目配置与 Bridge 连通性",
+        description="检查项目根目录、配置文件、UPM 包、bridge.json 和 Bridge HTTP 可达性。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(doctor)
 
     return parser
 

@@ -89,6 +89,34 @@ cd src/unityctl
 uv run unityctl --help
 ```
 
+## 命令参考
+
+所有命令以 JSON 输出。全局选项 `--project PATH` 可指定 Unity 项目根目录（默认从当前目录向上查找）。
+
+| 命令 | 说明 |
+| --- | --- |
+| `init` | 初始化 `.unity-agent` 配置目录 |
+| `config show` | 输出合并后的有效配置 |
+| `config validate` | 校验 `config.json` 与 `config.local.json` |
+| `config set-local KEY VALUE` | 更新本机配置字段 |
+| `start` | 启动 Unity Editor（默认等待 Bridge 握手） |
+| `status` | 查询 Editor 状态（编译、Play Mode、当前场景等） |
+| `play` | 进入 Play Mode（可选 `--session` 记录运行日志） |
+| `stop` | 退出 Play Mode（可选 `--latest` 生成 summary） |
+| `pause` / `resume` | 暂停 / 恢复 Play Mode |
+| `open-scene PATH` | 在 Editor 中打开场景 |
+| `refresh` | 触发脚本重编译并等待完成 |
+| `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
+| `doctor` | 诊断项目配置与 Bridge 连通性 |
+
+查看完整参数说明：
+
+```bash
+unityctl --help
+unityctl play --help
+unityctl config --help
+```
+
 ## 初始化 Unity Project
 
 在 Unity 项目根目录执行。Unity 项目根目录指包含 `Assets`、`Packages` 和 `ProjectSettings` 的目录：
