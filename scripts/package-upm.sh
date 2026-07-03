@@ -25,11 +25,18 @@ PY
 ARCHIVE_NAME="com.mk.unity-agent-bridge-$VERSION.tgz"
 mkdir -p "$DIST_DIR"
 
+# Unity 要求本地 tarball 内部的顶层目录必须严格命名为 "package"
+# （而不是包名本身），否则 Unity 解压后会在临时目录下找不到
+# package.json，报错 "The file [.../package.json] cannot be found"。
+STAGE_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGE_DIR"' EXIT
+cp -R "$PACKAGE_DIR" "$STAGE_DIR/package"
+
 echo "打包 Unity UPM package：$ARCHIVE_NAME"
 tar \
   --exclude=".DS_Store" \
   -czf "$DIST_DIR/$ARCHIVE_NAME" \
-  -C "$REPO_ROOT/packages" \
-  "com.mk.unity-agent-bridge"
+  -C "$STAGE_DIR" \
+  "package"
 
 echo "$DIST_DIR/$ARCHIVE_NAME"
