@@ -5,8 +5,9 @@ import pytest
 
 from unityctl import __version__
 from unityctl import cli
+from unityctl.client import BridgeClientError
 from unityctl.convergence import ConvergenceResult
-from unityctl.discovery import BridgeInfo
+from unityctl.discovery import BridgeInfo, DiscoveryError
 
 
 def make_unity_project(path: Path) -> Path:
@@ -603,6 +604,107 @@ def test_start_command_waits_for_handshake_by_default(monkeypatch, tmp_path, cap
     assert output["bridgeUrl"] == "http://127.0.0.1:17891"
 
 
+def test_start_command_returns_already_running_when_bridge_reachable(
+    monkeypatch, tmp_path, capsys
+):
+    project = make_unity_project(tmp_path / "Game")
+    bridge_info = make_bridge_info(pid=9999, port=17891)
+
+    def fake_discover(project_path):
+        return bridge_info
+
+    class FakeBridgeClient:
+        def __init__(self, base_url, token):
+            self.base_url = base_url
+            self.token = token
+
+        def get_status(self):
+            return default_status()
+
+    def fake_start_editor(*args):
+        raise AssertionError("start_editor should not be called")
+
+    monkeypatch.setattr(cli, "discover", fake_discover)
+    monkeypatch.setattr(cli, "BridgeClient", FakeBridgeClient)
+    monkeypatch.setattr(cli, "start_editor", fake_start_editor)
+
+    exit_code = cli.main(["--project", str(project), "start"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["code"] == "already_running"
+    assert output["pid"] == 9999
+    assert output["logFile"] is None
+    assert output["bridgeReady"] is True
+    assert output["bridgeUrl"] == "http://127.0.0.1:17891"
+    assert output["unityVersion"] == "2022.3.62f2"
+
+
+def test_start_command_falls_through_to_lock_check_when_bridge_unreachable(
+    monkeypatch, tmp_path, capsys
+):
+    project = make_unity_project(tmp_path / "Game")
+    cli.main(
+        [
+            "--project",
+            str(project),
+            "init",
+            "--yes",
+            "--unity",
+            "/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity",
+        ]
+    )
+    capsys.readouterr()
+
+    bridge_info = make_bridge_info(pid=9999, port=17891)
+    start_calls = []
+
+    class FakeBridgeClient:
+        def __init__(self, base_url, token):
+            pass
+
+        def get_status(self):
+            raise BridgeClientError("connection refused", "bridge_unreachable")
+
+    class FakeProcess:
+        pid = 12345
+
+    monkeypatch.setattr(cli, "discover", lambda project_path: bridge_info)
+    monkeypatch.setattr(cli, "BridgeClient", FakeBridgeClient)
+    monkeypatch.setattr(cli, "is_unity_project_locked", lambda project_path: False)
+    monkeypatch.setattr(cli, "start_editor", lambda *args: (start_calls.append(args) or FakeProcess()))
+
+    exit_code = cli.main(["--project", str(project), "start", "--no-wait"])
+
+    assert exit_code == 0
+    assert len(start_calls) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["code"] == "ok"
+    assert output["pid"] == 12345
+
+
+def test_start_command_fails_fast_when_project_locked(monkeypatch, tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    def fake_discover(project_path):
+        raise DiscoveryError("no bridge")
+
+    def fake_start_editor(*args):
+        raise AssertionError("start_editor should not be called")
+
+    monkeypatch.setattr(cli, "discover", fake_discover)
+    monkeypatch.setattr(cli, "is_unity_project_locked", lambda project_path: True)
+    monkeypatch.setattr(cli, "start_editor", fake_start_editor)
+
+    exit_code = cli.main(["--project", str(project), "start"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "editor_already_running"
+
+
 def test_stop_latest_updates_latest_session_summary(monkeypatch, tmp_path, capsys):
     project = make_unity_project(tmp_path / "Game")
     cli.main(
@@ -673,5 +775,6 @@ def test_doctor_reports_all_checks(monkeypatch, tmp_path, capsys):
     names = [check["name"] for check in output["checks"]]
     assert "project_root" in names
     assert "config_json" in names
+    assert "project_lock" in names
     # 未启动 Unity Editor 时 bridge.json 不存在，doctor 命令本身应正常返回而不是抛异常
     assert exit_code in (0, 1)

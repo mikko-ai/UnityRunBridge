@@ -3,6 +3,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # 非 POSIX 平台，本项目当前面向 macOS，暂不专门适配
+    fcntl = None
+
 from unityctl.config import BRIDGE_HOST, BRIDGE_INFO_FILENAME, find_unity_project_root
 
 
@@ -78,6 +83,35 @@ def is_pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def is_unity_project_locked(project_path: str | Path) -> bool:
+    """探测 Temp/UnityLockfile 是否已被其他 Unity 实例持有（非阻塞）。
+
+    该锁文件不存在时说明项目从未被打开过，视为未锁定。
+    打开/加锁过程中遇到无法归类为"未锁定"的异常（如权限问题）时，
+    保守地按"已锁定"处理：宁可误报占用、提示用户手动确认，
+    也不要在无法安全判断时仍然 spawn 出第二个可能卡死的 Unity 进程。
+    非 POSIX 平台（无 fcntl）时始终返回 False，退化为只依赖第一层幂等检测。
+    """
+    if fcntl is None:
+        return False
+    lock_path = Path(project_path) / "Temp" / "UnityLockfile"
+    if not lock_path.exists():
+        return False
+    try:
+        fd = os.open(str(lock_path), os.O_RDWR)
+    except OSError:
+        return True  # fail-closed：无法确认安全性时按已锁定处理
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 
 def discover(project_path: str | Path) -> BridgeInfo:

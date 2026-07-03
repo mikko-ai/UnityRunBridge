@@ -4,7 +4,19 @@ from pathlib import Path
 
 import pytest
 
-from unityctl.discovery import BridgeInfo, DiscoveryError, discover, is_pid_alive, read_bridge_info
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+from unityctl.discovery import (
+    BridgeInfo,
+    DiscoveryError,
+    discover,
+    is_pid_alive,
+    is_unity_project_locked,
+    read_bridge_info,
+)
 
 
 def make_unity_project(path: Path) -> Path:
@@ -133,3 +145,43 @@ def test_discover_cleans_up_stale_file_when_pid_dead(tmp_path):
     assert "已不存在" in str(exc.value)
     assert exc.value.code == "editor_not_running"
     assert not bridge_path.exists()
+
+
+def test_is_unity_project_locked_returns_false_when_no_temp_dir(tmp_path):
+    project = make_unity_project(tmp_path / "Game")
+
+    assert is_unity_project_locked(project) is False
+
+
+def test_is_unity_project_locked_returns_true_when_lock_held(tmp_path):
+    if fcntl is None:
+        pytest.skip("fcntl not available on this platform")
+
+    project = make_unity_project(tmp_path / "Game")
+    lock_path = project / "Temp" / "UnityLockfile"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("", encoding="utf-8")
+
+    fd = os.open(str(lock_path), os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert is_unity_project_locked(project) is True
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    assert is_unity_project_locked(project) is False
+
+
+def test_is_unity_project_locked_fail_closed_on_open_error(tmp_path, monkeypatch):
+    project = make_unity_project(tmp_path / "Game")
+    lock_path = project / "Temp" / "UnityLockfile"
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text("", encoding="utf-8")
+
+    def fake_open(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("unityctl.discovery.os.open", fake_open)
+
+    assert is_unity_project_locked(project) is True

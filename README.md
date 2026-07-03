@@ -164,7 +164,7 @@ unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/20
 unityctl start
 ```
 
-默认会等待 Unity Editor 完成握手（写出 `bridge.json` 并可被连接）。需要只启动 Unity 进程时：
+默认会等待 Unity Editor 完成握手（写出 `bridge.json` 并可被连接）。若项目已在运行且 Bridge 可达，重复执行会直接返回 `already_running`，不会重复启动 Unity 进程。需要只启动 Unity 进程时：
 
 ```bash
 unityctl start --no-wait

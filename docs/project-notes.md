@@ -174,7 +174,7 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 
 命令集：`init`、`config show|validate|set-local`、`start`、`status`、`play`、`stop`、`pause`、`resume`、`open-scene`、`logs`、`errors`、`summary`、`refresh`、`doctor`。旧版的 `start-editor` 已删除（`start` 已完全覆盖其能力）。
 
-`refresh` 会触发 `AssetDatabase.Refresh()` 并轮询直到编译完成，是 agent 改完代码后验证编译是否通过的主入口。`doctor` 会依次检查 project root、`config.json` 是否可解析、`unityExecutablePath` 是否存在、UPM package 是否已安装、`bridge.json` 是否存在、Editor 进程是否存活、Bridge 是否可达，输出统一的诊断报告。
+`refresh` 会触发 `AssetDatabase.Refresh()` 并轮询直到编译完成，是 agent 改完代码后验证编译是否通过的主入口。`doctor` 会依次检查 project root、`config.json` 是否可解析、`unityExecutablePath` 是否存在、UPM package 是否已安装、`bridge.json` 是否存在、Editor 进程是否存活、Bridge 是否可达、项目是否被 Unity 占用（`project_lock`），输出统一的诊断报告。
 
 ## Session 与运行观测
 
@@ -204,7 +204,7 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 已完成的主要能力：
 
 - Python CLI package 与 `unityctl` 命令入口。
-- Unity Editor 进程启动，`unityctl start` 启动后轮询握手直到 Bridge 就绪。
+- Unity Editor 进程启动，`unityctl start` 启动后轮询握手直到 Bridge 就绪；重复 `start` 时若 Bridge 已可达则幂等返回 `already_running`，若项目被占用但 Bridge 未就绪则快速失败（`editor_already_running`）。
 - Unity Editor-only Bridge package `com.mk.unity-agent-bridge`。
 - 握手发现：`bridge.json` 原子写入/删除、端口顺延、token 鉴权。
 - 统一 HTTP 响应信封（`ok`/`code`/`message`）与状态码映射（200/401/404/409/422/500）。
@@ -218,7 +218,7 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 - Unity project root 自动发现。
 - 纯 JSON 配置 `.unity-agent/config.json` 和 `.unity-agent/config.local.json`，`init` 时同步内置 schema 到项目内。
 - `unityctl config show` / `set-local` / `validate`。
-- `unityctl refresh`、`unityctl doctor`。
+- `unityctl refresh`、`unityctl doctor`（含 `project_lock` 项目占用检测）。
 - `--latest` session 查询能力。
 - JSON Schema 和 examples（含 `bridge.schema.json`、`config.schema.json`、`config.local.schema.json`）。
 - Python 与 Unity EditMode 测试脚本。

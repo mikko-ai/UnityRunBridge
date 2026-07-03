@@ -32,6 +32,7 @@ from unityctl.discovery import (
     bridge_info_path,
     discover,
     is_pid_alive,
+    is_unity_project_locked,
     read_bridge_info,
 )
 from unityctl.editor import start_editor
@@ -716,6 +717,41 @@ def cmd_stop(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
     effective = resolve_effective_config(project_path=args.project_path, unity_path=args.unity_path)
+    project_path = effective.project_path
+
+    info: BridgeInfo | None = None
+    try:
+        candidate = discover(project_path)
+        BridgeClient(candidate.base_url, candidate.token).get_status()
+        info = candidate
+    except (DiscoveryError, BridgeClientError):
+        info = None
+
+    if info is not None:
+        return {
+            "ok": True,
+            "code": "already_running",
+            "pid": info.pid,
+            "projectPath": str(project_path),
+            "unityExecutablePath": (
+                str(effective.unity_executable_path)
+                if effective.unity_executable_path
+                else None
+            ),
+            "logFile": None,
+            "bridgeReady": True,
+            "bridgeUrl": info.base_url,
+            "unityVersion": info.unity_version,
+        }
+
+    if is_unity_project_locked(project_path):
+        raise CliError(
+            "editor_already_running",
+            "检测到该 Unity 项目已被另一个 Editor 实例占用（Temp/UnityLockfile），"
+            "但 Bridge 尚未就绪，可能卡在多实例提示框或正在握手中。"
+            "请先处理已有的 Unity 窗口（关闭弹窗或退出该实例）后再运行 unityctl start。",
+        )
+
     unity_executable = effective.unity_executable_path
     if unity_executable is None:
         raise CliError(
@@ -742,14 +778,14 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
     }
 
     if not args.no_wait:
-        info = wait_for_handshake(
+        handshake_info = wait_for_handshake(
             effective.project_path,
             expected_pid=process.pid,
             timeout_seconds=effective.timeouts.start_editor_seconds,
         )
         payload["bridgeReady"] = True
-        payload["bridgeUrl"] = info.base_url
-        payload["unityVersion"] = info.unity_version
+        payload["bridgeUrl"] = handshake_info.base_url
+        payload["unityVersion"] = handshake_info.unity_version
 
     return payload
 
@@ -863,17 +899,38 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
         except DiscoveryError as exc:
             add("bridge_json", False, str(exc))
 
+    bridge_reachable = False
     if info is not None:
         alive = is_pid_alive(info.pid)
         add("editor_pid_alive", alive, f"pid={info.pid}")
         if alive:
             try:
                 BridgeClient(info.base_url, info.token).get_status()
+                bridge_reachable = True
                 add("bridge_reachable", True, info.base_url)
             except BridgeClientError as exc:
                 add("bridge_reachable", False, str(exc))
         else:
             add("bridge_reachable", False, "editor process not alive")
+
+    if project_path is not None:
+        locked = is_unity_project_locked(project_path)
+        if bridge_reachable:
+            add(
+                "project_lock",
+                True,
+                f"项目由存活且可达的 Editor 进程持有（pid={info.pid}）",
+            )
+        elif locked:
+            add(
+                "project_lock",
+                False,
+                "检测到 Temp/UnityLockfile 被占用（或无法确认未被占用），但没有可达的 Bridge；"
+                "Unity 可能卡在多实例提示框、正在启动/编译中，或锁文件权限异常。"
+                "此时执行 unityctl start 会导致新实例卡死，建议先手动确认 Unity 窗口状态",
+            )
+        else:
+            add("project_lock", True, "项目未被占用，可以运行 unityctl start")
 
     overall_ok = all(check["ok"] for check in checks)
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
