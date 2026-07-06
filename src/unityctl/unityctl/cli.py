@@ -45,6 +45,12 @@ from unityctl.session import (
     update_session_status,
     utc_now,
 )
+from unityctl.skills import (
+    DEFAULT_SKILLS_DIRNAME,
+    SkillError,
+    install_skill,
+    resolve_skills_dir,
+)
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
 
 
@@ -395,6 +401,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_project_option(doctor)
 
+    skills = subparsers.add_parser(
+        "skills",
+        help="安装或更新 agent skill（SKILL.md）",
+        description=(
+            "把 CLI 内置的 unityctl skill 安装到项目的 skills 目录，"
+            f"默认 {DEFAULT_SKILLS_DIRNAME}/，供 coding agent 学习 Unity 验证流程。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(skills)
+    skills_subparsers = skills.add_subparsers(
+        dest="skills_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    skills_init = skills_subparsers.add_parser(
+        "init",
+        help="安装 skill（已存在时不覆盖）",
+        formatter_class=_HelpFormatter,
+    )
+    skills_update = skills_subparsers.add_parser(
+        "update",
+        help="把 skill 刷新为当前 CLI 版本内置内容（总是覆盖；未安装则直接安装）",
+        formatter_class=_HelpFormatter,
+    )
+    for sub in (skills_init, skills_update):
+        sub.add_argument(
+            "--target",
+            metavar="PATH",
+            default=None,
+            help=(
+                "skills 根目录；相对路径基于 Unity 项目根目录解析，也可用绝对路径"
+                f"（默认 {DEFAULT_SKILLS_DIRNAME}）"
+            ),
+        )
+
     return parser
 
 
@@ -431,6 +474,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "summary": cmd_summary,
         "refresh": cmd_refresh,
         "doctor": cmd_doctor,
+        "skills": cmd_skills,
     }
     handler = handlers.get(args.command)
     if handler is None:
@@ -1006,6 +1050,37 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
 
     overall_ok = all(check["ok"] for check in checks)
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
+
+
+def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
+    # 绝对路径 --target 不依赖项目根目录，找不到项目也允许安装
+    project_path: Path | None = None
+    try:
+        project_path = find_unity_project_root(args.project_path or Path.cwd())
+    except ConfigError:
+        pass
+
+    try:
+        skills_dir = resolve_skills_dir(project_path, args.target)
+        result = install_skill(
+            skills_dir,
+            version=__version__,
+            overwrite=args.skills_command == "update",
+        )
+    except SkillError as exc:
+        raise CliError("invalid_request", str(exc)) from exc
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "code": result.action,
+        "skillPath": str(result.skill_path),
+        "version": result.version,
+    }
+    if result.previous_version is not None and result.previous_version != result.version:
+        payload["previousVersion"] = result.previous_version
+    if result.action == "already_installed":
+        payload["hint"] = "skill 已存在且未被覆盖；如需刷新请运行 unityctl skills update"
+    return payload
 
 
 def _refresh_client(

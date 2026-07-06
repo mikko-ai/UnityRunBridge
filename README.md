@@ -108,6 +108,7 @@ uv run unityctl --help
 | `refresh` | 触发脚本重编译并等待完成 |
 | `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
 | `doctor` | 诊断项目配置与 Bridge 连通性 |
+| `skills init` / `skills update` | 安装 / 更新 agent skill（SKILL.md） |
 
 查看完整参数说明：
 
@@ -262,6 +263,30 @@ unityctl summary --session-path "/absolute/path/to/UnityProject/.unity-agent/ses
 ```
 
 将 ignore rules 保存到 Unity 项目的 `.unity-agent/log-rules.json`。`errors` 命令与 `summary` 命令共用同一套分类逻辑，口径保持一致，只支持 `ignore`，匹配字段为 `type` 和 `messageContains`。
+
+## Agent Skill
+
+CLI 内置了一份 `unityctl` 的 agent skill（SKILL.md），用自然语言描述"改代码 → refresh → play → summary"的标准 Unity 验证流程，供 Cursor、Claude Code 等 coding agent 学习使用。
+
+在 Unity 项目根目录（或其子目录）安装：
+
+```bash
+unityctl skills init
+```
+
+默认安装到 Unity 项目的 `.agents/skills/unityctl/SKILL.md`。可以用 `--target` 指定其他 skills 根目录，相对路径基于项目根目录解析，也支持绝对路径：
+
+```bash
+unityctl skills init --target .cursor/skills          # 安装到项目的 .cursor/skills/
+unityctl skills init --target ~/.claude/skills        # 安装到全局目录（绝对路径不要求在 Unity 项目内执行）
+```
+
+行为语义与 `init` / schema 一致：
+
+- `skills init`：已存在时不覆盖，返回 `already_installed`。
+- `skills update`：总是刷新为当前 CLI 版本内置内容（未安装则直接安装）；升级 CLI 后运行一次即可同步 skill。
+
+skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的 CLI 版本。
 
 ## 数据契约与示例
 
