@@ -7,16 +7,23 @@ from typing import Any
 PROBLEM_TYPES = {"Error"}
 BLOCKING_TYPES = {"Exception", "Assert"}
 
+# summary.json 中 watchedLogs 保留的最大条数（watchedCount 始终是全量命中数）。
+# watch 规则匹配到高频日志（如每帧心跳）时避免 summary 无限膨胀。
+WATCHED_LOGS_LIMIT = 50
+
 
 def load_log_rules(project_path: str | Path) -> dict[str, list[dict[str, str]]]:
     rules_path = Path(project_path).expanduser().resolve() / ".unity-agent" / "log-rules.json"
+    empty: dict[str, list[dict[str, str]]] = {"ignore": [], "watch": []}
     if not rules_path.exists():
-        return {"ignore": []}
+        return empty
     payload = json.loads(rules_path.read_text(encoding="utf-8"))
-    ignore = payload.get("ignore", [])
-    if not isinstance(ignore, list):
-        return {"ignore": []}
-    return {"ignore": [rule for rule in ignore if isinstance(rule, dict)]}
+    result = dict(empty)
+    for key in ("ignore", "watch"):
+        rules = payload.get(key, [])
+        if isinstance(rules, list):
+            result[key] = [rule for rule in rules if isinstance(rule, dict)]
+    return result
 
 
 def build_summary(
@@ -24,7 +31,7 @@ def build_summary(
     rules: dict[str, list[dict[str, str]]] | None = None,
 ) -> dict[str, Any]:
     session = Path(session_path).expanduser().resolve()
-    rule_payload = rules or {"ignore": []}
+    rule_payload = rules or {"ignore": [], "watch": []}
     logs = read_jsonl(session / "unity-console.jsonl")
     session_payload = read_json(session / "session.json")
 
@@ -39,11 +46,18 @@ def build_summary(
     problem_count = 0
     blocking_problem_count = 0
     last_problem = None
+    watch_rules = rule_payload.get("watch", [])
+    watched_count = 0
+    watched_logs: list[dict[str, Any]] = []
 
-    for row in logs:
+    for line, row in enumerate(logs, start=1):
         log_type = str(row.get("type", "Log"))
         if log_type in counts:
             counts[log_type] += 1
+
+        if watch_rules and matches_rules(row, watch_rules):
+            watched_count += 1
+            watched_logs.append(watched_payload(row, line))
 
         severity = classify_log(row, rule_payload)
         if severity == "ignored_problem":
@@ -84,6 +98,8 @@ def build_summary(
         "ignoredProblemCount": ignored_problem_count,
         "blockingProblemCount": blocking_problem_count,
         "lastProblem": last_problem,
+        "watchedCount": watched_count,
+        "watchedLogs": watched_logs[-WATCHED_LOGS_LIMIT:],
         "startedAt": started_at,
         "endedAt": ended_at,
         "durationMs": duration_ms(started_at, ended_at),
@@ -120,17 +136,19 @@ def classify_log(row: dict[str, Any], rules: dict[str, list[dict[str, str]]]) ->
     log_type = str(row.get("type", "Log"))
     if log_type not in PROBLEM_TYPES and log_type not in BLOCKING_TYPES:
         return "normal"
-    if matches_ignore(row, rules.get("ignore", [])):
+    if matches_rules(row, rules.get("ignore", [])):
         return "ignored_problem"
     if log_type in BLOCKING_TYPES:
         return "blocking"
     return "problem"
 
 
-def matches_ignore(row: dict[str, Any], ignore_rules: list[dict[str, str]]) -> bool:
+def matches_rules(row: dict[str, Any], rules: list[dict[str, str]]) -> bool:
+    """ignore 与 watch 共用的规则匹配：type 精确匹配，messageContains 子串匹配，
+    两个条件都给出时须同时满足。"""
     log_type = str(row.get("type", ""))
     message = str(row.get("message", ""))
-    for rule in ignore_rules:
+    for rule in rules:
         expected_type = rule.get("type")
         message_contains = rule.get("messageContains")
         if expected_type and expected_type != log_type:
@@ -146,6 +164,17 @@ def problem_payload(row: dict[str, Any], severity: str) -> dict[str, Any]:
         "type": row.get("type"),
         "message": row.get("message"),
         "severity": severity,
+        "sequence": row.get("sequence"),
+        "playModeFrame": row.get("playModeFrame"),
+        "scenePath": row.get("scenePath"),
+    }
+
+
+def watched_payload(row: dict[str, Any], line: int) -> dict[str, Any]:
+    return {
+        "line": line,
+        "type": row.get("type"),
+        "message": row.get("message"),
         "sequence": row.get("sequence"),
         "playModeFrame": row.get("playModeFrame"),
         "scenePath": row.get("scenePath"),

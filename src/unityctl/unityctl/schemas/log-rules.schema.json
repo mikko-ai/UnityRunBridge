@@ -7,29 +7,42 @@
   "required": ["ignore"],
   "properties": {
     "ignore": {
+      "description": "命中的 problem/blocking 日志不再计入 errors 与 summary 的问题统计（降噪）。",
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
-          },
-          "messageContains": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "anyOf": [
-          {
-            "required": ["type"]
-          },
-          {
-            "required": ["messageContains"]
-          }
-        ]
+        "$ref": "#/$defs/rule"
       }
+    },
+    "watch": {
+      "description": "命中的日志会被提取到 summary.json 的 watchedLogs 字段（聚焦关注点），不影响问题分类。",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+        },
+        "messageContains": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["type"]
+        },
+        {
+          "required": ["messageContains"]
+        }
+      ]
     }
   }
 }

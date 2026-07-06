@@ -243,13 +243,23 @@ unityctl errors --latest
 unityctl summary --latest
 ```
 
+日志量大时，`logs` 支持在查询侧过滤（完整日志始终保留在 `unity-console.jsonl` 中）：
+
+```bash
+unityctl logs --latest --grep "关键字"             # 按 message 子串过滤（不区分大小写）
+unityctl logs --latest --type Error,Exception     # 按日志类型过滤
+unityctl logs --latest --after-sequence 500       # 只看 sequence > 500 的增量日志
+```
+
+`logs` 与 `errors` 输出的每条日志都带 `line` 字段（该条日志在 `unity-console.jsonl` 中的 1-based 行号），需要查看某条日志前后的上下文时，可以据此直接定位到完整日志文件。
+
 也可以显式指定 session 目录：
 
 ```bash
 unityctl summary --session-path "/absolute/path/to/UnityProject/.unity-agent/sessions/2026-07-02_100000_login-flow"
 ```
 
-可选 ignore rules：
+可选 log rules（保存到 Unity 项目的 `.unity-agent/log-rules.json`）：
 
 ```json
 {
@@ -258,11 +268,19 @@ unityctl summary --session-path "/absolute/path/to/UnityProject/.unity-agent/ses
       "type": "Error",
       "messageContains": "Expected test error"
     }
+  ],
+  "watch": [
+    {
+      "messageContains": "本次要验证的关键日志片段"
+    }
   ]
 }
 ```
 
-将 ignore rules 保存到 Unity 项目的 `.unity-agent/log-rules.json`。`errors` 命令与 `summary` 命令共用同一套分类逻辑，口径保持一致，只支持 `ignore`，匹配字段为 `type` 和 `messageContains`。
+两类规则的匹配字段都是 `type` 和 `messageContains`（同时给出时须同时满足）：
+
+- `ignore`（降噪）：命中的 Error/Exception/Assert 日志不再计入问题统计。`errors` 命令与 `summary` 命令共用同一套分类逻辑，口径保持一致。
+- `watch`（聚焦）：命中的日志在生成 summary 时被提取进 `watchedLogs` 字段（带 `line` 行号，最多保留最近 50 条，`watchedCount` 记录全量命中数），不影响问题分类。适合在 `play` 前声明本次运行的关注点，`stop --latest` 后直接从 summary 拿到命中日志。
 
 ## Agent Skill
 

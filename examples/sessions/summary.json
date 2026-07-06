@@ -10,6 +10,17 @@
   "ignoredProblemCount": 0,
   "blockingProblemCount": 0,
   "lastProblem": null,
+  "watchedCount": 1,
+  "watchedLogs": [
+    {
+      "line": 2,
+      "type": "Warning",
+      "message": "Example warning for agent review",
+      "sequence": 2,
+      "playModeFrame": 112,
+      "scenePath": "Assets/Scenes/Login.unity"
+    }
+  ],
   "startedAt": "2026-06-30T18:30:14Z",
   "endedAt": "2026-06-30T18:31:02Z",
   "durationMs": 48000,

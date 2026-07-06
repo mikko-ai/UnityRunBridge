@@ -405,6 +405,104 @@ def test_play_with_session_creates_session_and_starts_bridge(monkeypatch, tmp_pa
     assert ("play", None) in clients[0].calls
 
 
+def make_console_log(session: Path, rows: list[dict]) -> None:
+    session.mkdir(parents=True, exist_ok=True)
+    (session / "unity-console.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+
+
+def sample_log_rows() -> list[dict]:
+    return [
+        {"sequence": 1, "type": "Log", "message": "Boot start"},
+        {"sequence": 2, "type": "Warning", "message": "shader fallback"},
+        {"sequence": 3, "type": "Log", "message": "Login begin"},
+        {"sequence": 4, "type": "Error", "message": "login failed: timeout"},
+        {"sequence": 5, "type": "Log", "message": "Login retry"},
+    ]
+
+
+def test_logs_command_adds_line_numbers_and_counts(tmp_path, capsys):
+    session = tmp_path / "s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(["logs", "--session-path", str(session)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["totalCount"] == 5
+    assert output["matchedCount"] == 5
+    assert [row["line"] for row in output["logs"]] == [1, 2, 3, 4, 5]
+
+
+def test_logs_command_grep_is_case_insensitive_and_keeps_line(tmp_path, capsys):
+    session = tmp_path / "s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(["logs", "--session-path", str(session), "--grep", "login"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["matchedCount"] == 3
+    # line 是全量日志中的行号，过滤后不重排
+    assert [row["line"] for row in output["logs"]] == [3, 4, 5]
+
+
+def test_logs_command_filters_by_type(tmp_path, capsys):
+    session = tmp_path / "s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(
+        ["logs", "--session-path", str(session), "--type", "Error,Warning"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert [row["sequence"] for row in output["logs"]] == [2, 4]
+
+
+def test_logs_command_after_sequence_returns_increment_only(tmp_path, capsys):
+    session = tmp_path / "s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(
+        ["logs", "--session-path", str(session), "--after-sequence", "3"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert [row["sequence"] for row in output["logs"]] == [4, 5]
+
+
+def test_logs_command_limit_applies_after_filtering(tmp_path, capsys):
+    session = tmp_path / "s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(
+        ["logs", "--session-path", str(session), "--grep", "login", "--limit", "2"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["matchedCount"] == 3
+    # limit 取过滤结果中最近的 N 条
+    assert [row["line"] for row in output["logs"]] == [4, 5]
+
+
+def test_errors_command_includes_line_numbers(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"
+    make_console_log(session, sample_log_rows())
+
+    exit_code = cli.main(["--project", str(project), "errors", "--latest"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert len(output["errors"]) == 1
+    assert output["errors"][0]["line"] == 4
+    assert output["errors"][0]["message"] == "login failed: timeout"
+
+
 def test_summary_command_prints_summary_file(tmp_path, capsys):
     session = tmp_path / "s1"
     session.mkdir()

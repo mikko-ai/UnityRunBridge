@@ -197,7 +197,10 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 - 否则按日志分类：`Exception` / `Assert` 默认视为 blocking problem，会让 `status` 变成 `failed`。
 - 普通 `Error` 会记录为 problem（`status` 为 `problem_detected`），但不必然代表业务失败。
 - `Warning` 默认不影响状态。
-- `.unity-agent/log-rules.json` 可配置 ignore rules；`unityctl errors` 复用与 `summary` 相同的分类逻辑（`classify_log` + `load_log_rules`），口径保持一致。
+- `.unity-agent/log-rules.json` 可配置 ignore rules（降噪）与 watch rules（聚焦）；`unityctl errors` 复用与 `summary` 相同的分类逻辑（`classify_log` + `load_log_rules`），口径保持一致。
+- watch rules 命中的日志会在生成 summary 时提取进 `watchedLogs` 字段（带 `line` 行号，最多保留最近 50 条，`watchedCount` 记录全量命中数），不影响问题分类。agent 可以在 `play` 前声明本次运行的关注点，`stop` 后直接从 summary 拿到命中日志。
+
+Play Mode 期间日志量可能很大，而要验证的行为往往发生在运行后期，因此 `unityctl logs` 支持查询侧过滤：`--grep`（message 子串，不区分大小写）、`--type`（日志类型，逗号分隔）、`--after-sequence`（只看某个 sequence 游标之后的增量，利用 sequence 单调递增的特性跳过启动噪音）。过滤只影响查询结果，`unity-console.jsonl` 始终全量落盘。`logs` 与 `errors` 输出的每条日志都带 `line` 字段（在 `unity-console.jsonl` 中的 1-based 行号），便于回到完整日志中查看上下文；`logs` 输出还包含 `totalCount` / `matchedCount`。SKILL.md 中同步给出了推荐的读日志顺序（先 `errors`，再按关键字过滤，不做全量通读）。
 
 ## 已完成
 

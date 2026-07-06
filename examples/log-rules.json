@@ -4,5 +4,10 @@
       "type": "Error",
       "messageContains": "Expected test error"
     }
+  ],
+  "watch": [
+    {
+      "messageContains": "Example warning"
+    }
   ]
 }

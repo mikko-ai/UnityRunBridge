@@ -16,6 +16,8 @@
     "ignoredProblemCount",
     "blockingProblemCount",
     "lastProblem",
+    "watchedCount",
+    "watchedLogs",
     "startedAt",
     "endedAt",
     "durationMs",
@@ -70,6 +72,19 @@
         }
       ]
     },
+    "watchedCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "命中 log-rules.json watch 规则的日志总数。"
+    },
+    "watchedLogs": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "命中 watch 规则的日志（最多保留最近 50 条；line 为该条日志在 unity-console.jsonl 中的 1-based 行号）。",
+      "items": {
+        "$ref": "#/$defs/watchedLog"
+      }
+    },
     "startedAt": {
       "type": ["string", "null"]
     },
@@ -108,6 +123,42 @@
         "severity": {
           "type": "string",
           "enum": ["problem", "blocking"]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "playModeFrame": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "scenePath": {
+          "type": "string"
+        }
+      }
+    },
+    "watchedLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "line",
+        "type",
+        "message",
+        "sequence",
+        "playModeFrame",
+        "scenePath"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+        },
+        "message": {
+          "type": "string"
         },
         "sequence": {
           "type": "integer",

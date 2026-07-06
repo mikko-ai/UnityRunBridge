@@ -355,7 +355,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="读取 session 的 Unity 控制台日志",
         description=(
             "从 session 目录的 unity-console.jsonl 读取 Unity Console 日志，"
-            "按时间顺序返回最近的 N 条（含 type、message、stackTrace 等字段）。"
+            "按时间顺序返回过滤后最近的 N 条（含 type、message、stackTrace 等字段）。"
+            "每条日志附带 line 字段（在 unity-console.jsonl 中的 1-based 行号），"
+            "便于回到完整日志中查看上下文。"
         ),
         formatter_class=_HelpFormatter,
     )
@@ -366,7 +368,24 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         metavar="N",
-        help="返回最近的 N 条日志",
+        help="返回过滤后最近的 N 条日志",
+    )
+    logs.add_argument(
+        "--grep",
+        metavar="TEXT",
+        help="只返回 message 包含该子串的日志（不区分大小写）",
+    )
+    logs.add_argument(
+        "--type",
+        dest="types",
+        metavar="TYPES",
+        help="按日志类型过滤，逗号分隔（如 Error,Exception,Warning,Log,Assert）",
+    )
+    logs.add_argument(
+        "--after-sequence",
+        type=int,
+        metavar="N",
+        help="只返回 sequence 大于 N 的日志（用于跳过已读日志、只看增量）",
     )
 
     errors = subparsers.add_parser(
@@ -928,7 +947,36 @@ def cmd_logs(args: argparse.Namespace) -> dict[str, Any]:
     project_path = _resolve_optional_project(args)
     session_path = resolve_session_path(args, project_path)
     rows = read_jsonl(session_path / "unity-console.jsonl")
-    return {"ok": True, "code": "ok", "logs": rows[-args.limit :]}
+    # line 是该条日志在 unity-console.jsonl 中的 1-based 行号，
+    # 过滤后仍保留，便于回到完整日志中查看前后上下文。
+    numbered = [{"line": index, **row} for index, row in enumerate(rows, start=1)]
+
+    filtered = numbered
+    if args.grep:
+        needle = args.grep.lower()
+        filtered = [
+            row for row in filtered if needle in str(row.get("message", "")).lower()
+        ]
+    if args.types:
+        wanted = {item.strip().lower() for item in args.types.split(",") if item.strip()}
+        filtered = [
+            row for row in filtered if str(row.get("type", "")).lower() in wanted
+        ]
+    if args.after_sequence is not None:
+        filtered = [
+            row
+            for row in filtered
+            if isinstance(row.get("sequence"), int)
+            and row["sequence"] > args.after_sequence
+        ]
+
+    return {
+        "ok": True,
+        "code": "ok",
+        "totalCount": len(numbered),
+        "matchedCount": len(filtered),
+        "logs": filtered[-args.limit :],
+    }
 
 
 def cmd_errors(args: argparse.Namespace) -> dict[str, Any]:
@@ -937,10 +985,10 @@ def cmd_errors(args: argparse.Namespace) -> dict[str, Any]:
     rules = load_log_rules(project_path)
     rows = read_jsonl(session_path / "unity-console.jsonl")
     problems = []
-    for row in rows:
+    for line, row in enumerate(rows, start=1):
         severity = classify_log(row, rules)
         if severity in {"problem", "blocking"}:
-            problems.append({**row, "severity": severity})
+            problems.append({"line": line, **row, "severity": severity})
     return {"ok": True, "code": "ok", "errors": problems}
 
 
