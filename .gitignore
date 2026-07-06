@@ -67,3 +67,5 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+
+tmp_refs/
