@@ -132,6 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=_HelpFormatter,
     )
+    _add_project_option(init)
     init.add_argument(
         "--unity",
         dest="unity_path",
@@ -300,6 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     pause = subparsers.add_parser(
         "pause",
         help="暂停 Play Mode",
+        description="暂停当前 Play Mode（等同 Editor 中的暂停按钮），用 resume 恢复。",
         formatter_class=_HelpFormatter,
     )
     _add_project_option(pause)
@@ -307,6 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume = subparsers.add_parser(
         "resume",
         help="恢复 Play Mode",
+        description="恢复被 pause 暂停的 Play Mode。",
         formatter_class=_HelpFormatter,
     )
     _add_project_option(resume)
@@ -350,6 +353,10 @@ def build_parser() -> argparse.ArgumentParser:
     logs = subparsers.add_parser(
         "logs",
         help="读取 session 的 Unity 控制台日志",
+        description=(
+            "从 session 目录的 unity-console.jsonl 读取 Unity Console 日志，"
+            "按时间顺序返回最近的 N 条（含 type、message、stackTrace 等字段）。"
+        ),
         formatter_class=_HelpFormatter,
     )
     _add_project_option(logs)
@@ -374,6 +381,12 @@ def build_parser() -> argparse.ArgumentParser:
     summary = subparsers.add_parser(
         "summary",
         help="读取 session 的 summary.json",
+        description=(
+            "读取 session 的运行结果汇总。status 取值："
+            "passed（无问题）、problem_detected（出现普通 Error 日志，需结合日志判断）、"
+            "failed（出现 Exception/Assert 等 blocking problem，或进程级失败，"
+            "原因见 failedReason）。"
+        ),
         formatter_class=_HelpFormatter,
     )
     _add_project_option(summary)
@@ -382,6 +395,11 @@ def build_parser() -> argparse.ArgumentParser:
     refresh = subparsers.add_parser(
         "refresh",
         help="触发脚本重编译并等待完成",
+        description=(
+            "触发 AssetDatabase.Refresh() 并轮询直到编译结束，"
+            "返回 compilationSucceeded 与 compilationErrors。"
+            "改完代码后用它验证编译是否通过。"
+        ),
         formatter_class=_HelpFormatter,
     )
     _add_project_option(refresh)

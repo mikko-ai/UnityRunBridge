@@ -16,15 +16,14 @@ x-unityctl-version: __UNITYCTL_VERSION__
 # 1. 触发脚本重编译并等待完成（阻塞直到编译结束）
 unityctl refresh
 
-# 2. 编译通过后，进入 Play Mode 并记录 session
-unityctl play --session <名称> [--scene Assets/Scenes/Xxx.unity]
+# 2. 编译通过后，进入 Play Mode 并记录 session（--task 记录任务描述，便于复盘）
+unityctl play --session <名称> [--scene Assets/Scenes/Xxx.unity] [--task "验证登录流程"]
 
-# 3. 观察一段时间后退出 Play Mode，自动生成 summary
+# 3. 观察一段时间后退出 Play Mode；输出中直接包含 summary，无需再单独查询
 unityctl stop --latest
-
-# 4. 读取运行结果
-unityctl summary --latest
 ```
+
+`play` 成功后输出包含 `sessionId` 和 `sessionPath`，后续命令可用 `--latest` 或 `--session-path <路径>` 引用该 session。`stop --latest` 的输出已带 `summary` 字段；如需事后重新读取，再运行 `unityctl summary --latest`。
 
 判读规则：
 
@@ -39,7 +38,15 @@ unityctl start             # 启动 Unity Editor 并等待 Bridge 就绪（已�
 unityctl status            # 查询 editorState、编译状态、当前场景
 ```
 
-- 项目未初始化时（缺 `.unity-agent/config.json`），先运行 `unityctl init --yes`，再在 `.unity-agent/config.local.json` 中配置 `unityExecutablePath`。
+- 项目未初始化时（缺 `.unity-agent/config.json`），按以下顺序初始化：
+
+```bash
+unityctl init --yes
+unityctl config set-local unityExecutablePath "/Applications/Unity/Hub/Editor/<版本>/Unity.app/Contents/MacOS/Unity"
+unityctl config validate    # 确认配置无误后再 start
+```
+
+- `unityctl config show` 输出合并后的有效配置（项目配置 + 本机配置），排查配置问题时先看它。
 - `start` 返回 `editor_already_running` 表示项目被另一个 Editor 实例占用但 Bridge 未就绪，此时不要重试 `start`，先运行 `unityctl doctor` 检查，必要时请用户处理已打开的 Unity 窗口。
 
 ## 日志与排错
@@ -49,6 +56,16 @@ unityctl logs --latest --limit 100    # 最近一次 session 的 Unity Console �
 unityctl errors --latest              # 只看 problem/blocking 级别的日志
 unityctl open-scene <场景路径>         # 在 Editor 中打开场景
 unityctl pause / unityctl resume      # 暂停/恢复 Play Mode
+```
+
+如果项目存在已知无害的 Error 日志（例如第三方插件的固定报错），可在项目的 `.unity-agent/log-rules.json` 中配置 ignore 规则，`errors` 与 `summary` 会按同一套规则过滤，避免误判：
+
+```json
+{
+  "ignore": [
+    { "type": "Error", "messageContains": "已知无害的报错片段" }
+  ]
+}
 ```
 
 ## 常见错误码
@@ -63,6 +80,7 @@ unityctl pause / unityctl resume      # 暂停/恢复 Play Mode
 
 ## 注意事项
 
-- `play`/`stop`/`refresh` 默认阻塞直到目标状态达成，不需要自行轮询 `status`。
+- `play`/`stop`/`refresh` 默认阻塞直到目标状态达成，不需要自行轮询 `status`。超时秒数默认读取 `config.json`，可用 `--timeout <秒>` 覆盖；`play`/`stop` 支持 `--no-wait` 立即返回（跳过状态收敛，一般不建议 agent 使用）。
 - Unity 编译（domain reload）期间 Bridge 会短暂中断，CLI 已内部处理重连，无需干预。
 - session 产物位于 `.unity-agent/sessions/<sessionId>/`（`session.json`、`unity-console.jsonl`、`summary.json`），可直接读取文件做进一步分析。
+- 本文只覆盖常用流程；完整参数运行 `unityctl <命令> --help` 查看。
