@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "displayName": "Unity Agent Bridge",
   "description": "Editor-only localhost bridge for controlling Unity PlayMode from external agent tools.",
-  "unity": "2021.3",
+  "unity": "2022.3",
   "author": {
     "name": "MK"
   }

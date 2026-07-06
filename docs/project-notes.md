@@ -217,7 +217,9 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 - 全局命令设计：package 名 `unity-run-bridge`，命令名 `unityctl`。
 - Unity project root 自动发现。
 - 纯 JSON 配置 `.unity-agent/config.json` 和 `.unity-agent/config.local.json`，`init` 时同步内置 schema 到项目内。
+- `unityctl init` 检测并可写入 Unity `Packages/manifest.json` 中的 bridge package 依赖。
 - `unityctl config show` / `set-local` / `validate`。
+- `unityctl --version` 从 Python package metadata 输出 CLI 版本。
 - `unityctl refresh`、`unityctl doctor`（含 `project_lock` 项目占用检测）。
 - `--latest` session 查询能力。
 - JSON Schema 和 examples（含 `bridge.schema.json`、`config.schema.json`、`config.local.schema.json`）。
@@ -227,8 +229,6 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 
 暂未进入或还需要继续完善的方向：
 
-- 自动修改 Unity `Packages/manifest.json` 安装 package。
-- `unityctl --version`，从 Python package metadata 输出 CLI 版本。
 - 更完整的跨平台路径校验，尤其是 Windows 与 Unity Hub 非默认安装路径。
 - 非 Python 用户的一键安装脚本、二进制分发或更顺滑的安装体验。
 - MCP adapter，让其他 agent 可以通过 MCP tools 调用 UnityRunBridge。

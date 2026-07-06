@@ -1,3 +1,4 @@
+import json
 import tomllib
 from pathlib import Path
 
@@ -7,6 +8,14 @@ def test_python_package_name_is_specific_but_command_stays_unityctl():
 
     assert payload["project"]["name"] == "unity-run-bridge"
     assert payload["project"]["scripts"] == {"unityctl": "unityctl.cli:main"}
+
+
+def test_unity_package_requires_unity_2022_3_or_newer():
+    repo_root = Path(__file__).resolve().parents[3]
+    package_json = repo_root / "packages" / "com.mk.unity-agent-bridge" / "package.json"
+    payload = json.loads(package_json.read_text(encoding="utf-8"))
+
+    assert payload["unity"] == "2022.3"
 
 
 def test_bundled_schemas_are_byte_identical_to_repo_root_schemas():
