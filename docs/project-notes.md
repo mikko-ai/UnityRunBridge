@@ -34,7 +34,7 @@ UnityRunBridge 的目标是为 Unity 项目提供一个低侵入的本地运行�
 - Unity Editor-only package：`packages/com.mk.unity-agent-bridge`
 - Python CLI：`src/unityctl`
 
-Unity package 只运行在 Editor 中，不进入 runtime build，不修改业务代码。它启动一个本地 HTTP Bridge，提供状态查询、Play Mode 控制、场景打开、脚本重编译触发、session 绑定和日志写入能力。
+Unity package 只运行在 Editor 中，不进入 runtime build，不修改业务代码。它启动一个本地 HTTP Bridge，提供状态查询、Play Mode 控制、场景打开、脚本重编译触发、session 绑定和日志写入能力；在此基础上垂直扩展出 UGUI Hierarchy 查询、截图、UI 操作模拟、零侵入 gameplay 命令桥、动作录制、性能采样、批量资产健康检查等能力（见「垂直能力扩展」一节），以及独立 batchmode 进程执行的 Player 构建诊断。
 
 Python CLI 负责：
 
@@ -86,6 +86,42 @@ Unity 的 Play Mode 进入/退出、脚本重编译都是异步的。`play`、`s
 ### 3. 纯 JSON 配置 + Schema
 
 配置文件从 `.jsonc` 改为纯 `.json`，不再支持注释和尾随逗号，也不再需要自定义 JSONC 解析器。`init` 时会把 CLI 内置的 schema 文件复制到 `.unity-agent/schemas/`，配置文件里的 `$schema` 字段指向它们，供编辑器提供自动补全和字段说明（中文 `description`），替代过去的行内注释。
+
+## 垂直能力扩展（Phase 0-4）
+
+在「运行控制 + 运行观测」的基础底座之上，按照"垂直能力架构方案"分五个 Phase 继续扩展，让 agent 能完成从"看懂画面结构"到"操作 UI / 调用游戏逻辑"到"固化成可复跑脚本"到"量化性能与项目健康度"的完整闭环。设计上延续既有的三个核心思路（握手发现、状态收敛、纯 JSON + Schema），并新增了两个基础设施层：
+
+### Phase 0：路由注册 + 异步 job 模型
+
+- **路由/能力注册**（`Editor/Routing/`）：把原来硬编码的 HTTP 路由表改成显式注册机制（`RouteTable.Register`），每个功能模块的 Controller 在加载时自行注册路由，并向 `CapabilityRegistry` 声明自己提供的能力名；`GET /capabilities` 汇总输出，CLI 侧用它判断 Bridge（UPM 包）版本是否支持某个命令，缺失时报 `bridge_capability_missing` 而不是笼统的 404。
+- **异步 job 模型**（`Editor/Jobs/`）：截图、Prefab 扫描等耗时操作不能阻塞 HTTP 请求线程，也不能一次性做完（会卡住 Editor 主线程），统一抽象成「`POST .../start` 返回 `jobId` → 轮询 `GET /jobs/{id}` → 终态 `succeeded`/`failed`」的模式。`JobManager` 负责生命周期、并发数上限、超时熔断；domain reload 会清空内存态，`JobManager` 用 `SessionState` 记录"reload 前有正在跑的 job"，reload 后统一标成 `failed`（`interrupted_by_reload`），如实上报而不是让调用方永久卡在轮询。
+- **手写 JSON 层**（`Editor/Json/`）：没有引入 `com.unity.nuget.newtonsoft-json` 依赖，而是自己写了一个 Newtonsoft 风格但更精简的 `JsonParser`/`JsonWriter`/`JsonValue`，Editor-only、无第三方依赖、行为可控（递归深度/输入体积上限、确定性 key 顺序，便于测试断言）。
+- **session artifacts 目录约定**：新增能力的产物（截图、`actions.jsonl`、`metrics.jsonl`、`gameplay-invokes.jsonl`）统一落在当前 session 的 `artifacts/` 下，没有 session 时落 `.unity-agent/scratch/`；`ArtifactPathGuard` 校验落盘路径必须在这两类目录之内，防止任意路径写入。
+
+### Phase 1：结构化理解（只读）
+
+- **Hierarchy 查询**（`Editor/Hierarchy/`）：`roots`/`tree`/`find`/`ancestors`/`inspect` 五个只读命令，语义对齐 Unity Editor 的 Hierarchy 窗口和常用 C# 反射查询能力（按组件类型、公开属性条件过滤，支持分页），而不是让模型自己判断"这块 UI 看起来像什么"——结构化事实优先于视觉猜测。多场景 Additive 加载、同名兄弟节点等边界情况都有专门处理（`ambiguous_path`、`[index]` 后缀）。
+- **截图**（`Editor/Capture/`）：作为结构化查询的补充，而不是主要事实来源；配置项区分"是否允许 agent 主动请求截图"和"截图是否可以被模型读取"，把权限和用途分离，管控口径可配置而不是硬编码。
+
+### Phase 2：操作与执行
+
+- **UI 操作**（`Editor/Interaction/`）：`click`/`input`/`set-value` 直接派发 Unity 事件系统的真实事件链（`IPointerDownHandler`、`onValueChanged` 等），而不是直接改内部状态——保证验证的是"用户操作会发生什么"而不是"我手动摆出了某个状态"。默认做射线遮挡验证（`occluded`/`no_click_handler`），`--force` 才跳过。
+- **Gameplay 命令桥**（`Editor/Gameplay/`）：零侵入是核心约束——游戏代码不需要引用本包也能被发现调用（duck-typed attribute，游戏自己定义一个同名 attribute 类即可），另有白名单直调作为不需要游戏侧配合的备选通道。默认关闭，且是项目里最大的"任意代码执行"入口，所有调用都落审计日志。
+- **动作录制**（`Editor/Recording/`）：录的是语义动作（按 `path` 记录的点击/输入），不是坐标或像素，这样录制产物既能给人复盘，也能机械转换成 scenario 草稿。实现上因为 Editor-only 程序集不能挂 `MonoBehaviour`，改成了静态类 + `EditorApplication.update` 驱动的轮询模型——这个模式后来在 Phase 4 的 `MetricsSampler`、`PrefabScanRunner` 上复用。
+
+### Phase 3：固化为可复跑脚本
+
+`unityctl scenario` 把"操作 UI → 等待收敛 → 断言事实"的一次性验证固化成 JSON 文件，可重复执行、机器判定通过/失败，替代 agent 每次读日志主观判断。关键设计取舍：
+
+- 断言判定逻辑全部放在 **CLI 侧（Python）**，Bridge 只负责提供 hierarchy/日志/gameplay/metric 的原始事实——保持 Bridge 侧简单，判定逻辑用 Python 写更容易维护和测试。
+- v1 刻意做成线性步骤表：无变量、无条件分支、无循环。先把"能确定性复跑"这个最小可用版本做稳，复杂控制流留给后续版本按需再加。
+- `scenario from-recording` 只做机械转换，不自动插入 `wait-for`/`assert`——录制脚本知道"发生了什么"，但不知道"应该断言什么"，这一步交给人补。
+
+### Phase 4：量化与诊断
+
+- **性能采样**（`Editor/Profiling/`）：用 `ProfilerRecorder` 采固定一组计数器，明确不追求"绝对性能数字"（Editor 内采样含 Editor 自身开销），只服务于"同机同项目改动前后的相对回归对比"这一个场景，避免误用。
+- **Build 诊断**（`Editor/Build/` + `build.py`）：故意做成完全独立于 Bridge 的第二进程（`-executeMethod` batchmode 构建），因为 Unity 一次只能有一个进程持有项目的 `Library`/`Temp` 锁——构建必须是"另一个 Unity 实例"，不能复用正在跑的交互式 Editor。CLI 侧兜底解析 `build.log` 里的编译错误，覆盖"报告都没生成"的失败模式（脚本编译错误会导致 `-executeMethod` 从未真正执行）。
+- **项目健康检查**（`Editor/Health/` + `health.py`）：`doctor` 回答"环境能不能跑"，`health` 回答"项目干不干净"，两者定位不同不合并。检查项设计成互相独立、可单独跑、Bridge 不可达时优雅降级为 `skipped` 而不是让整体检查失败——这样静态检查（`build_scenes`/`packages`）永远可用，不必先启动 Editor。
 
 ## 配置设计
 
@@ -143,7 +179,7 @@ unityctl init
 - 脚本或 CI 中可以使用 `unityctl init --yes` 跳过确认。
 - 只补缺失的 `config.json` / `config.local.json`，不覆盖已有文件。
 - 把内置 schema 复制/刷新到 `.unity-agent/schemas/`（schema 是机器生成物，总是覆盖）。
-- 补 `.gitignore` 中缺失的 `.unity-agent/config.local.json`、`.unity-agent/sessions/`、`.unity-agent/bridge.json`。
+- 补 `.gitignore` 中缺失的 `.unity-agent/config.local.json`、`.unity-agent/sessions/`、`.unity-agent/bridge.json`、`.unity-agent/scratch/`、`.unity-agent/builds/`。
 - 初始化完成后提示用户编辑 local 配置并运行 `unityctl config validate`。
 
 已初始化项目再次执行 `init` 时，不会重写用户手改过的 `config.json` / `config.local.json`。
@@ -172,7 +208,7 @@ unityctl --project /path/to/UnityProject status
 
 Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令保持短命令 `unityctl`，内部 Python import package 仍是 `unityctl`。
 
-命令集：`init`、`config show|validate|set-local`、`start`、`status`、`play`、`stop`、`pause`、`resume`、`open-scene`、`logs`、`errors`、`summary`、`refresh`、`doctor`。旧版的 `start-editor` 已删除（`start` 已完全覆盖其能力）。
+命令集：`init`、`config show|validate|set-local`、`start`、`status`、`play`、`stop`、`pause`、`resume`、`open-scene`、`logs`、`errors`、`summary`、`refresh`、`doctor`、`hierarchy`、`snapshot`、`click`、`input`、`set-value`、`gameplay`、`record`、`profile`、`scenario`、`build`、`health`、`skills`。旧版的 `start-editor` 已删除（`start` 已完全覆盖其能力）。
 
 `refresh` 会触发 `AssetDatabase.Refresh()` 并轮询直到编译完成，是 agent 改完代码后验证编译是否通过的主入口。`doctor` 会依次检查 project root、`config.json` 是否可解析、`unityExecutablePath` 是否存在、UPM package 是否已安装、`bridge.json` 是否存在、Editor 进程是否存活、Bridge 是否可达、项目是否被 Unity 占用（`project_lock`），输出统一的诊断报告。
 
@@ -227,6 +263,12 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 - `--latest` session 查询能力。
 - JSON Schema 和 examples（含 `bridge.schema.json`、`config.schema.json`、`config.local.schema.json`）。
 - Python 与 Unity EditMode 测试脚本。
+- 专门的 Agent skill（SKILL.md），用自然语言封装常见 Unity 验证流程（含垂直能力扩展后的完整用法与错误码表），`unityctl skills init/update` 分发到项目内。
+- Phase 0 基础设施：路由/能力注册机制（`RouteTable` + `CapabilityRegistry` + `GET /capabilities`）、异步 job 模型（`JobManager`，支持并发上限、超时熔断、domain reload 后如实标记 `interrupted_by_reload`）、手写 JSON 解析器/写入器（`Editor/Json/`，无第三方依赖）、session artifacts 目录约定与路径校验（`ArtifactPathGuard`）。
+- Phase 1 结构化理解：只读 UGUI Hierarchy 查询命令组 `roots`/`tree`/`find`/`ancestors`/`inspect`（组件过滤、属性条件、分页、多场景消歧）；Play Mode 截图 job 与 `unityctl snapshot`（配额、权限配置分离）。
+- Phase 2 操作与执行：射线遮挡验证的 `click`/`input`/`set-value`（真实派发 Unity 事件系统事件链）；零侵入 gameplay 命令桥（duck-typed attribute + 白名单双通道，默认关闭，带审计日志）；UGUI 语义动作录制（`unityctl record`，产出 `actions.jsonl`）。
+- Phase 3 可复跑验证脚本：`unityctl scenario`（`validate`/`run`/`from-recording`），CLI 侧断言引擎覆盖 `ui`/`log`/`gameplay`/`metric` 四类条件源，结果并入 session `summary.json`。
+- Phase 4 量化与诊断：`ProfilerRecorder` 逐帧性能采样（`unityctl profile`，60 帧批量落盘、`avg`/`max`/`p95` 汇总）；独立 batchmode 进程的 Player 构建诊断（`unityctl build`，`build-report.json` + 编译错误日志兜底解析）；项目健康检查（`unityctl health`：`compilation`/`missing_scripts`/`build_scenes`/`packages`，Bridge 不可达时优雅降级为 `skipped`）。
 
 ## 还没有做
 
@@ -235,11 +277,7 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 - 更完整的跨平台路径校验，尤其是 Windows 与 Unity Hub 非默认安装路径。
 - 非 Python 用户的一键安装脚本、二进制分发或更顺滑的安装体验。
 - MCP adapter，让其他 agent 可以通过 MCP tools 调用 UnityRunBridge。
-- 专门的 Agent skill，用自然语言封装常见 Unity 验证流程。
-- 游戏画面结构化理解。
-- 游戏 UI 自动点击、录制/回放和 gameplay command bridge。
-- 自动生成验证断言。
-- 性能 profiling、build 诊断、项目健康检查等更垂直的后续 agent service。
+- scenario v2：变量、条件分支、循环（v1 刻意保持线性步骤表，按需再加）。
 - UI Prefab 自动拼接。
 
 ## 当前不做的方向
@@ -247,8 +285,7 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 这些方向有价值，但不是当前 MVP 主路径：
 
 - 完全无侵入式 Unity 控制。完全无侵入很难稳定控制 Play Mode 和场景。
-- 依赖截图或多模态视觉作为主要事实来源。它适合作为辅助，不适合作为第一版自动验证核心。
-- 自动操作游戏 UI。需要游戏侧暴露结构化状态或命令接口，暂不进入基础设施阶段。
+- 依赖截图或多模态视觉作为主要事实来源。它适合作为辅助（`snapshot`/`scenario` 的 `screenshot`/`snapshot` 步骤都保留为可选观测手段），不适合作为断言判定的主要依据——断言逻辑始终建立在 hierarchy/日志/gameplay/metric 这些结构化事实上。
 - UI Prefab 自动拼接。它依赖设计图理解、资源匹配、Prefab 规范和运行验证，应该在运行与观测底座稳定后再做。
 - MCP 第一版。当前优先 CLI 和本地 HTTP 协议，MCP 可以作为后续适配层。
 - 配置迁移工具。这一版是彻底重构，不保留旧结构，也不提供从旧结构自动迁移的能力。
@@ -268,7 +305,11 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 .unity-agent/config.local.json
 .unity-agent/sessions/
 .unity-agent/bridge.json
+.unity-agent/scratch/
+.unity-agent/builds/
 ```
+
+（`init` 会自动把这几条补进 Unity 项目的 `.gitignore`，缺失才补，不会重复添加或删除用户自定义内容。）
 
 本仓库自身保留：
 
@@ -279,14 +320,8 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 
 ## 后续建议
 
-下一步比较自然的是做一次实际项目试用：
+基础运行控制/观测链路已经过真实项目验证，垂直能力扩展（Phase 0-4）在仓库自带的临时测试项目上跑过完整 Python + Unity EditMode 测试，但还没有过真实业务项目的实战检验。下一步比较自然的是：
 
-1. 在真实 Unity project 中添加 UPM package（`com.mk.unity-agent-bridge`）。
-2. 运行 `unityctl init`。
-3. 配置 `config.local.json` 的 `unityExecutablePath`。
-4. 运行 `unityctl config validate`。
-5. 运行 `unityctl start` 和 `unityctl status`。
-6. 跑一次 `unityctl play --session <name>`，再用 `stop --latest` 和 `summary --latest` 检查结果。
-7. 改一段会编译报错的代码，运行 `unityctl refresh` 确认能正确报出编译错误。
-
-真实项目试用后，再决定优先补安装体验、MCP adapter，还是更强的验证能力。
+1. 在真实 Unity project 中添加 UPM package（`com.mk.unity-agent-bridge`），跑一遍基础链路：`init` → `config validate` → `start`/`status` → `play --session <name>` → `stop --latest` → `summary --latest` → 故意改一段编译报错代码验证 `refresh`。
+2. 在同一个真实项目里试跑垂直能力：`hierarchy find` 看真实 UGUI 结构是否符合预期、`click`/`input` 走一遍真实登录/交互流程、录一段 `record` 并用 `scenario from-recording` 生成草稿补上断言、跑一次 `unityctl health` 看真实项目会报出哪些 `missing_scripts`/`packages` 问题。
+3. 用真实项目的反馈决定下一步优先级：是补安装体验、做 MCP adapter，还是继续加固 scenario 的表达能力（变量/条件分支）。

@@ -10,6 +10,14 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 打开 Unity 项目中的场景。
 - 触发脚本重编译并等待结果（`unityctl refresh`）。
 - 诊断本机环境与 Bridge 连通性（`unityctl doctor`）。
+- 只读查询 UGUI Hierarchy 结构（`unityctl hierarchy`）与 Play Mode 截图（`unityctl snapshot`）。
+- 模拟 UGUI 点击 / 输入 / 设值（`click` / `input` / `set-value`），带射线遮挡验证。
+- 零侵入调用游戏侧暴露的命令（`unityctl gameplay`，默认关闭）。
+- 录制 UGUI 语义动作为 `actions.jsonl`（`unityctl record`），供复盘或生成 scenario 草稿。
+- 用 JSON 文件固化「操作 → 断言」的自动化验证脚本并可重复执行（`unityctl scenario`）。
+- `ProfilerRecorder` 逐帧性能采样，用于改动前后的相对回归比较（`unityctl profile`）。
+- 独立进程执行 Player 构建并生成结构化报告（`unityctl build`）。
+- 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性（`unityctl health`）。
 
 Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17890` 开始，被占用会自动顺延），实际端口和鉴权 token 由 Unity 写入项目内的 `.unity-agent/bridge.json` 握手文件，CLI 会自动读取，不需要手动配置。
 
@@ -108,6 +116,15 @@ uv run unityctl --help
 | `refresh` | 触发脚本重编译并等待完成 |
 | `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
 | `doctor` | 诊断项目配置与 Bridge 连通性 |
+| `hierarchy roots/tree/find/ancestors/inspect` | 只读查询 UGUI Hierarchy 结构 |
+| `snapshot` | Play Mode 截图（落盘 PNG） |
+| `click` / `input` / `set-value` | 模拟 UGUI 点击 / 输入 / 设值（需 Play Mode） |
+| `gameplay list` / `gameplay invoke` | 零侵入调用游戏侧暴露的命令（默认关闭） |
+| `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl` |
+| `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
+| `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
+| `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
+| `health` | 项目健康检查（编译/缺失脚本/构建场景/包一致性） |
 | `skills init` / `skills update` | 安装 / 更新 agent skill（SKILL.md） |
 
 查看完整参数说明：
@@ -282,6 +299,67 @@ unityctl summary --session-path "/absolute/path/to/UnityProject/.unity-agent/ses
 - `ignore`（降噪）：命中的 Error/Exception/Assert 日志不再计入问题统计。`errors` 命令与 `summary` 命令共用同一套分类逻辑，口径保持一致。
 - `watch`（聚焦）：命中的日志在生成 summary 时被提取进 `watchedLogs` 字段（带 `line` 行号，最多保留最近 50 条，`watchedCount` 记录全量命中数），不影响问题分类。适合在 `play` 前声明本次运行的关注点，`stop --latest` 后直接从 summary 拿到命中日志。
 
+## 查询 Hierarchy / 截图（只读，Play Mode 内外均可用于查询）
+
+```bash
+unityctl hierarchy roots                                # 列出所有已加载场景的根节点
+unityctl hierarchy tree MainCanvas --depth 2            # 从指定节点向下遍历子树
+unityctl hierarchy find --component Button --active-only
+unityctl hierarchy inspect MainCanvas/ShopWindow/BuyButton
+unityctl snapshot --reason assert_failure                # 需 Play Mode，截图落盘为 PNG
+```
+
+节点用 `path`（`/` 分隔）或 `instanceId` 定位；`snapshot` 受 `config.json` 里 `capture.screenshot` 配置管控（开关、配额、是否允许 agent 主动请求）。
+
+## 模拟 UI 操作 / Gameplay 命令桥（需 Play Mode）
+
+```bash
+unityctl click MainCanvas/ShopWindow/BuyButton           # 默认对目标做射线遮挡验证
+unityctl input MainCanvas/Login/NameField --text "Alice" --submit
+unityctl set-value MainCanvas/Settings/VolumeSlider --value 0.5
+
+unityctl gameplay list                                   # 查看可调用命令菜单（需先在 config.json 开启 gameplay.enabled）
+unityctl gameplay invoke CheatManager.AddGold --args '{"amount": 100}'
+```
+
+`click`/`input`/`set-value` 直接派发 Unity 事件系统事件链，不是修改内部状态。`gameplay` 是零侵入调用游戏代码的通道（duck-typed attribute 或白名单），**默认关闭**，需在 `config.json` 显式开启且应只在测试/开发环境使用。
+
+## 录制与自动化验证脚本（Scenario）
+
+```bash
+unityctl record start                                     # 录制手工点击/输入为 actions.jsonl
+unityctl record stop
+
+unityctl scenario from-recording actions.jsonl -o draft.json   # 从录制生成 scenario 草稿
+unityctl scenario validate draft.json                     # 只做结构校验，不连接 Bridge
+unityctl scenario run draft.json                          # 执行并生成 session + summary（含断言结果）
+```
+
+scenario 用 JSON 文件把「打开场景 → 操作 UI → 等待收敛 → 断言事实」固化成可重复执行、机器判定通过/失败的脚本；断言判定全部在 CLI 侧完成。字段结构见 `schemas/scenario.schema.json`。
+
+## 性能采样与 Build 诊断
+
+```bash
+unityctl profile start                                    # 需 Play Mode，ProfilerRecorder 逐帧采样
+# 让游戏运行一段时间……
+unityctl profile stop                                     # 返回 metricsPath 及 avg/max/p95 汇总
+
+unityctl build --target StandaloneOSX                     # 独立 batchmode 进程执行 Player 构建
+```
+
+`profile` 的采样值含 Editor 自身开销，只适合同机同项目改动前后的相对回归比较。`build` 会在独立 Unity 进程里执行（与正在运行的交互式 Editor 互斥，不会自动关闭），产物落在 `.unity-agent/builds/<buildId>/`，含 `build-report.json` 与 `build.log`。
+
+## 项目健康检查
+
+```bash
+unityctl health                                            # 跑全部检查项
+unityctl health --check compilation,missing_scripts        # 只跑指定项
+```
+
+四项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
+
+以上各命令的完整参数、错误码和判读规则见内置的 [`unityctl` agent skill](src/unityctl/unityctl/skill_assets/SKILL.md)（`unityctl skills init` 后也会安装到你的 Unity 项目里）。
+
 ## Agent Skill
 
 CLI 内置了一份 `unityctl` 的 agent skill（SKILL.md），用自然语言描述"改代码 → refresh → play → summary"的标准 Unity 验证流程，供 Cursor、Claude Code 等 coding agent 学习使用。
@@ -318,6 +396,12 @@ schemas/session.schema.json
 schemas/unity-console-log.schema.json
 schemas/summary.schema.json
 schemas/log-rules.schema.json
+schemas/actions.schema.json          # unityctl record 产出的 actions.jsonl
+schemas/recording-meta.schema.json   # unityctl record 产出的 recording-meta.json
+schemas/scenario.schema.json         # unityctl scenario run/validate 的输入文件
+schemas/scenario-result.schema.json  # unityctl scenario run 产出的 scenario-result.json
+schemas/metrics.schema.json          # unityctl profile 产出的 metrics.jsonl（逐行）
+schemas/build-report.schema.json     # unityctl build 产出的 build-report.json
 ```
 
 `examples/` 提供最小可读样例：
