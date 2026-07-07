@@ -6,6 +6,15 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using Mk.UnityAgentBridge.Editor.Capture;
+using Mk.UnityAgentBridge.Editor.Gameplay;
+using Mk.UnityAgentBridge.Editor.Health;
+using Mk.UnityAgentBridge.Editor.Hierarchy;
+using Mk.UnityAgentBridge.Editor.Interaction;
+using Mk.UnityAgentBridge.Editor.Json;
+using Mk.UnityAgentBridge.Editor.Profiling;
+using Mk.UnityAgentBridge.Editor.Recording;
+using Mk.UnityAgentBridge.Editor.Routing;
 
 namespace Mk.UnityAgentBridge.Editor
 {
@@ -21,11 +30,36 @@ namespace Mk.UnityAgentBridge.Editor
 
         static BridgeServer()
         {
+            RegisterAllRoutes();
             EditorApplication.update += ProcessPendingRequests;
             AssemblyReloadEvents.beforeAssemblyReload += Stop;
             EditorApplication.quitting += StopForEditorQuit;
             SessionController.RestoreActiveSession();
             Start();
+        }
+
+        /// <summary>
+        /// 路由注册表随 domain reload 清空，因此每次静态构造函数执行都要重新注册一遍。
+        /// 显式列表，不用反射扫描——包内代码自己维护注册点即可，新增 Controller 时在此追加一行。
+        /// </summary>
+        private static void RegisterAllRoutes()
+        {
+            RouteTable.Reset();
+            CapabilityRegistry.Reset();
+
+            CoreController.RegisterRoutes();
+            PlayModeController.RegisterRoutes();
+            SceneController.RegisterRoutes();
+            SessionController.RegisterRoutes();
+            Jobs.JobsController.RegisterRoutes();
+            HierarchyController.RegisterRoutes();
+            CaptureController.RegisterRoutes();
+            InteractionController.RegisterRoutes();
+            GameplayController.RegisterRoutes();
+            RecordingController.RegisterRoutes();
+            ProfilingController.RegisterRoutes();
+            HealthController.RegisterRoutes();
+            CapabilitiesController.RegisterRoutes();
         }
 
         public static void Start()
@@ -147,7 +181,7 @@ namespace Mk.UnityAgentBridge.Editor
                 try
                 {
                     object payload = Route(request.Context.Request);
-                    request.StatusCode = ResolveStatusCode(payload as BridgeResponse);
+                    request.StatusCode = ResolveStatusCode(payload);
                     request.Payload = payload;
                 }
                 catch (Exception ex)
@@ -172,68 +206,14 @@ namespace Mk.UnityAgentBridge.Editor
             string method = request.HttpMethod.ToUpperInvariant();
             string path = request.Url.AbsolutePath.Trim('/').ToLowerInvariant();
 
-            if (method == "GET" && path == "status")
+            RouteHandler handler = RouteTable.Resolve(method, path, out string pathParam);
+            if (handler == null)
             {
-                return EditorStateProvider.GetStatus();
+                return BridgeResponse.Failure("not_found", $"unsupported route: {method} /{path}");
             }
 
-            if (method == "POST" && path == "play")
-            {
-                return PlayModeController.EnterPlayMode();
-            }
-
-            if (method == "POST" && path == "stop")
-            {
-                return PlayModeController.ExitPlayMode();
-            }
-
-            if (method == "POST" && path == "pause")
-            {
-                return PlayModeController.Pause();
-            }
-
-            if (method == "POST" && path == "resume")
-            {
-                return PlayModeController.Resume();
-            }
-
-            if (method == "POST" && path == "refresh")
-            {
-                AssetDatabase.Refresh();
-                return BridgeResponse.Success("accepted", "asset refresh triggered");
-            }
-
-            if (method == "POST" && path == "open-scene")
-            {
-                OpenSceneRequest sceneRequest = ParseJsonOrNull<OpenSceneRequest>(ReadBody(request));
-                if (sceneRequest == null)
-                {
-                    return BridgeResponse.Failure("invalid_request", "invalid open-scene request body");
-                }
-                return SceneController.OpenScene(sceneRequest.scenePath);
-            }
-
-            if (method == "POST" && path == "session/start")
-            {
-                SessionStartRequest sessionRequest = ParseJsonOrNull<SessionStartRequest>(ReadBody(request));
-                if (sessionRequest == null)
-                {
-                    return BridgeResponse.Failure("invalid_request", "invalid session start request");
-                }
-                return SessionController.StartSession(sessionRequest.sessionId, sessionRequest.sessionPath);
-            }
-
-            if (method == "POST" && path == "session/end")
-            {
-                return SessionController.EndSession();
-            }
-
-            if (method == "GET" && path == "session/status")
-            {
-                return SessionController.GetStatus();
-            }
-
-            return BridgeResponse.Failure("not_found", $"unsupported route: {method} /{path}");
+            BridgeRequestContext context = new BridgeRequestContext(request, pathParam);
+            return handler(context);
         }
 
         private static bool IsAuthorized(HttpListenerRequest request)
@@ -289,40 +269,49 @@ namespace Mk.UnityAgentBridge.Editor
                 && string.Equals(providedToken, expectedToken, StringComparison.Ordinal);
         }
 
-        private static int ResolveStatusCode(BridgeResponse response)
+        /// <summary>
+        /// 统一处理三种响应载荷形态：BridgeResponse（现有 DTO）、JsonValue、字典结构。
+        /// 只在 ok == false 时查 <see cref="BridgeErrorCodes"/>；ok == true 恒 200。
+        /// 无法识别的载荷（理论上不应发生）保守返回 200，避免误伤已有成功响应。
+        /// </summary>
+        internal static int ResolveStatusCode(object payload)
         {
-            if (response == null)
+            if (!TryExtractEnvelope(payload, out bool ok, out string code))
             {
                 return 200;
             }
 
-            switch (response.code)
-            {
-                case "unauthorized":
-                    return 401;
-                case "not_found":
-                    return 404;
-                case "busy":
-                case "compilation_failed":
-                    return 409;
-                case "invalid_request":
-                    return 422;
-                case "internal_error":
-                    return 500;
-                default:
-                    return 200;
-            }
+            return ok ? 200 : BridgeErrorCodes.ResolveHttpStatus(code);
         }
 
-        private static string ReadBody(HttpListenerRequest request)
+        private static bool TryExtractEnvelope(object payload, out bool ok, out string code)
         {
-            using StreamReader reader = new StreamReader(request.InputStream, request.ContentEncoding);
-            return reader.ReadToEnd();
+            switch (payload)
+            {
+                case null:
+                    ok = true;
+                    code = null;
+                    return false;
+                case BridgeResponse bridgeResponse:
+                    ok = bridgeResponse.ok;
+                    code = bridgeResponse.code;
+                    return true;
+                case JsonValue jsonValue when jsonValue.IsObject:
+                    ok = jsonValue.GetBoolean("ok", true);
+                    code = jsonValue.GetString("code");
+                    return true;
+                default:
+                    ok = true;
+                    code = null;
+                    return false;
+            }
         }
 
         private static void WriteJson(HttpListenerResponse response, int statusCode, object payload)
         {
-            string json = JsonUtility.ToJson(payload);
+            string json = payload is BridgeResponse bridgeResponse
+                ? JsonUtility.ToJson(bridgeResponse)
+                : JsonWriter.Serialize(payload);
             byte[] bytes = Encoding.UTF8.GetBytes(json);
             response.StatusCode = statusCode;
             response.ContentType = "application/json";

@@ -1,7 +1,7 @@
-using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using Mk.UnityAgentBridge.Editor.Routing;
 
 namespace Mk.UnityAgentBridge.Editor
 {
@@ -10,6 +10,22 @@ namespace Mk.UnityAgentBridge.Editor
         private const string SessionIdKey = "Mk.UnityAgentBridge.SessionId";
         private const string SessionPathKey = "Mk.UnityAgentBridge.SessionPath";
         private const string SequenceKey = "Mk.UnityAgentBridge.LogSequence";
+
+        public static void RegisterRoutes()
+        {
+            RouteTable.Register("POST", "session/start", ctx =>
+            {
+                SessionStartRequest sessionRequest = BridgeServer.ParseJsonOrNull<SessionStartRequest>(ctx.RawBody);
+                if (sessionRequest == null)
+                {
+                    return BridgeResponse.Failure("invalid_request", "invalid session start request");
+                }
+
+                return StartSession(sessionRequest.sessionId, sessionRequest.sessionPath);
+            });
+            RouteTable.Register("POST", "session/end", ctx => EndSession());
+            RouteTable.Register("GET", "session/status", ctx => GetStatus());
+        }
 
         private static string currentSessionId = string.Empty;
         private static string currentSessionPath = string.Empty;
@@ -121,15 +137,7 @@ namespace Mk.UnityAgentBridge.Editor
 
         public static bool IsAllowedSessionPath(string projectPath, string sessionPath)
         {
-            if (string.IsNullOrWhiteSpace(projectPath) || string.IsNullOrWhiteSpace(sessionPath))
-            {
-                return false;
-            }
-
-            string projectFullPath = Normalize(Path.GetFullPath(projectPath));
-            string sessionFullPath = Normalize(Path.GetFullPath(sessionPath));
-            string allowedRoot = Normalize(Path.Combine(projectFullPath, ".unity-agent", "sessions"));
-            return sessionFullPath.StartsWith(allowedRoot + "/", StringComparison.Ordinal);
+            return ArtifactPathGuard.IsAllowedSessionPath(projectPath, sessionPath);
         }
 
         private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
@@ -160,13 +168,7 @@ namespace Mk.UnityAgentBridge.Editor
 
         private static string GetProjectRoot()
         {
-            DirectoryInfo assetsDirectory = new DirectoryInfo(Application.dataPath);
-            return assetsDirectory.Parent == null ? string.Empty : assetsDirectory.Parent.FullName;
-        }
-
-        private static string Normalize(string path)
-        {
-            return path.Replace('\\', '/').TrimEnd('/');
+            return ArtifactPathGuard.GetProjectRoot();
         }
     }
 }

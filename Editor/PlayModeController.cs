@@ -1,9 +1,18 @@
 using UnityEditor;
+using Mk.UnityAgentBridge.Editor.Routing;
 
 namespace Mk.UnityAgentBridge.Editor
 {
     internal static class PlayModeController
     {
+        public static void RegisterRoutes()
+        {
+            RouteTable.Register("POST", "play", ctx => EnterPlayMode());
+            RouteTable.Register("POST", "stop", ctx => ExitPlayMode());
+            RouteTable.Register("POST", "pause", ctx => Pause());
+            RouteTable.Register("POST", "resume", ctx => Resume());
+        }
+
         public static BridgeResponse EnterPlayMode()
         {
             string editorState = EditorStateProvider.DeriveState(
