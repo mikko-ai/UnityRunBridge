@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ def load_log_rules(project_path: str | Path) -> dict[str, list[dict[str, str]]]:
 def build_summary(
     session_path: str | Path,
     rules: dict[str, list[dict[str, str]]] | None = None,
+    scenario_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = Path(session_path).expanduser().resolve()
     rule_payload = rules or {"ignore": [], "watch": []}
@@ -74,9 +76,12 @@ def build_summary(
     session_status = session_payload.get("status")
     session_failed_reason = session_payload.get("failedReason") if session_status == "failed" else None
 
+    # 断言失败视为 blocking：与 Exception/Assert 日志同级，任何一条不通过整个 session 就是 failed。
+    scenario_failed = bool(scenario_result) and scenario_result.get("stepsFailed", 0) > 0
+
     if session_status == "failed":
         status = "failed"
-    elif blocking_problem_count > 0:
+    elif blocking_problem_count > 0 or scenario_failed:
         status = "failed"
     elif problem_count > 0:
         status = "problem_detected"
@@ -86,7 +91,7 @@ def build_summary(
     started_at = session_payload.get("startedAt")
     ended_at = session_payload.get("endedAt")
 
-    return {
+    payload: dict[str, Any] = {
         "status": status,
         "hasProblems": problem_count > 0,
         "hasBlockingProblems": blocking_problem_count > 0,
@@ -105,6 +110,56 @@ def build_summary(
         "durationMs": duration_ms(started_at, ended_at),
         "failedReason": session_failed_reason,
     }
+
+    if scenario_result:
+        payload["scenario"] = {
+            "name": scenario_result.get("name"),
+            "stepsTotal": scenario_result.get("stepsTotal", 0),
+            "stepsPassed": scenario_result.get("stepsPassed", 0),
+            "stepsFailed": scenario_result.get("stepsFailed", 0),
+            "assertions": scenario_result.get("assertions", []),
+        }
+
+    metrics_section = _build_metrics_section(session)
+    if metrics_section:
+        payload["metrics"] = metrics_section
+
+    return payload
+
+
+def _build_metrics_section(session: Path) -> dict[str, Any] | None:
+    """session 存在 artifacts/metrics.jsonl（profile-start/profile-stop 产出）时，
+    按指标名聚合 avg/max/p95；不存在或没有任何数值样本时省略该字段（不写空对象）。"""
+    rows = read_jsonl(session / "artifacts" / "metrics.jsonl")
+    if not rows:
+        return None
+
+    values_by_metric: dict[str, list[float]] = {}
+    for row in rows:
+        for key, value in row.items():
+            if key in ("frame", "time") or not isinstance(value, (int, float)):
+                continue
+            values_by_metric.setdefault(key, []).append(float(value))
+
+    if not values_by_metric:
+        return None
+
+    metrics: dict[str, Any] = {}
+    for name, values in values_by_metric.items():
+        sorted_values = sorted(values)
+        metrics[name] = {
+            "avg": sum(sorted_values) / len(sorted_values),
+            "max": sorted_values[-1],
+            "p95": _percentile(sorted_values, 0.95),
+        }
+
+    return {"frameCount": len(rows), "metrics": metrics}
+
+
+def _percentile(sorted_values: list[float], fraction: float) -> float:
+    index = math.ceil(fraction * len(sorted_values)) - 1
+    index = max(0, min(len(sorted_values) - 1, index))
+    return sorted_values[index]
 
 
 def write_summary(session_path: str | Path, summary: dict[str, Any]) -> Path:

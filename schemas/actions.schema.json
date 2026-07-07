@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/actions.schema.json",
+  "title": "Unity Agent Bridge 录制动作（actions.jsonl 单行）",
+  "description": "actions.jsonl 是 JSON Lines 文件：POST /recording/start 之后每识别到一条语义动作就追加一行，每行是一个符合本 schema 的对象。回放（Phase 3 scenario）依赖 path 定位节点，不依赖 screenPos。",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/clickAction" },
+    { "$ref": "#/$defs/inputAction" }
+  ],
+  "$defs": {
+    "clickAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "frame", "type", "scene", "path", "screenPos"],
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "description": "相对本次录制开始（POST /recording/start）经过的秒数。"
+        },
+        "frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "记录时刻的 Time.frameCount。"
+        },
+        "type": {
+          "const": "click"
+        },
+        "scene": {
+          "type": "string",
+          "description": "目标节点所在场景名；挂在 DontDestroyOnLoad 下的对象固定为 \"DontDestroyOnLoad\"。"
+        },
+        "path": {
+          "type": "string",
+          "description": "目标节点的 hierarchy path（同 1.1 的 path 约定）。记录 path 而非坐标，使回放对分辨率/布局变化健壮。"
+        },
+        "screenPos": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" }
+          },
+          "description": "按下时的屏幕坐标，仅作附注；回放不依赖它。"
+        }
+      }
+    },
+    "inputAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "frame", "type", "scene", "path", "text"],
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "description": "相对本次录制开始经过的秒数。"
+        },
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "input"
+        },
+        "scene": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "InputField / TMP_InputField 所在节点的 hierarchy path。"
+        },
+        "text": {
+          "type": "string",
+          "description": "该输入框失去焦点那一刻的最终文本。"
+        }
+      }
+    }
+  }
+}

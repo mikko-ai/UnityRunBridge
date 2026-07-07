@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/scenario.schema.json",
+  "title": "Unity Agent Bridge Scenario",
+  "description": "unityctl scenario run 的输入文件：线性步骤表，无变量/条件分支/循环。实际字段级校验由 unityctl.scenario.validate_scenario 手写实现（零依赖，不引入 jsonschema），本文件仅作为人类可读的结构文档与编辑器提示来源。",
+  "type": "object",
+  "required": ["name", "steps"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "scenario 名字；run 时缺省 --session 名字用它。"
+    },
+    "description": {
+      "type": "string"
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "waitTimeoutSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "wait-for / assert 未显式给 timeoutSeconds 时的缺省超时秒数。"
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "open-scene", "play", "stop", "pause", "resume",
+            "click", "input", "set-value", "invoke",
+            "screenshot", "snapshot",
+            "profile-start", "profile-stop",
+            "wait-for", "assert"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "description": "结果引用名；assert/wait-for 缺省为 step-<index>。"
+        },
+        "continueOnFailure": {
+          "type": "boolean",
+          "default": false,
+          "description": "仅 assert/wait-for 有意义：失败后是否继续执行后续步骤（默认 false，中止并跳到收尾）。"
+        },
+        "timeoutSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "覆盖 defaults.waitTimeoutSeconds；用于 open-scene/play/stop 的收敛等待，以及 wait-for 的轮询超时。"
+        },
+        "scene": {
+          "type": "string",
+          "description": "open-scene 的目标场景路径；click/input/set-value 的可选场景消歧参数。"
+        },
+        "path": {
+          "type": "string",
+          "description": "click/input/set-value 的目标节点 hierarchy path 或 instanceId。"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "click 专用：跳过射线验证。"
+        },
+        "text": {
+          "type": "string",
+          "description": "input 专用：写入的文本。"
+        },
+        "submit": {
+          "type": "boolean",
+          "description": "input 专用：是否触发 onEndEdit/onSubmit。"
+        },
+        "value": {
+          "description": "set-value 专用：目标值（数字/布尔/对象，取决于组件类型）。"
+        },
+        "component": {
+          "type": "string",
+          "description": "set-value 专用：节点上有多个可设值组件时必须显式指定。"
+        },
+        "command": {
+          "type": "string",
+          "description": "invoke 专用，或 assert/wait-for 的 gameplay 条件：完全限定或 attribute 命令名。"
+        },
+        "args": {
+          "type": "object",
+          "description": "invoke 专用，或 gameplay 条件的调用参数。"
+        },
+        "recordedGap": {
+          "type": "number",
+          "description": "仅 scenario from-recording 生成的草稿携带：与上一条录制动作的时间间隔（秒），纯注释字段，引擎不消费。"
+        },
+        "ui": {
+          "$ref": "#/$defs/uiCondition"
+        },
+        "log": {
+          "$ref": "#/$defs/logCondition"
+        },
+        "gameplay": {
+          "$ref": "#/$defs/gameplayCondition"
+        },
+        "metric": {
+          "$ref": "#/$defs/metricCondition"
+        }
+      }
+    },
+    "uiCondition": {
+      "type": "object",
+      "description": "assert/wait-for 的 ui source：path 或 find 二选一，定位到节点/节点集合后按给出的字段判定。",
+      "properties": {
+        "path": { "type": "string" },
+        "scene": { "type": "string" },
+        "find": {
+          "type": "object",
+          "description": "同 GET /hierarchy/find 的过滤器子集（name/component/under/textContains/where 等）。"
+        },
+        "exists": { "type": "boolean" },
+        "activeInHierarchy": { "type": "boolean" },
+        "interactable": { "type": "boolean" },
+        "textEquals": { "type": "string" },
+        "textContains": { "type": "string" },
+        "countEquals": { "type": "integer", "minimum": 0 },
+        "countAtLeast": { "type": "integer", "minimum": 0 },
+        "countAtMost": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "logCondition": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+        },
+        "messageContains": { "type": "string" },
+        "absent": {
+          "type": "boolean",
+          "default": false,
+          "description": "true 表示断言「不应出现」。"
+        },
+        "sinceStep": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "限定日志范围为第 N 步（0-based，steps 数组下标）开始之后；缺省为整个 session。"
+        }
+      }
+    },
+    "gameplayCondition": {
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": { "type": "string" },
+        "args": { "type": "object" },
+        "equals": {},
+        "notEquals": {},
+        "greaterThan": { "type": "number" },
+        "lessThan": { "type": "number" },
+        "atLeast": { "type": "number" },
+        "atMost": { "type": "number" }
+      },
+      "description": "六种比较符恰好指定一个。"
+    },
+    "metricCondition": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "aggregate": {
+          "type": "string",
+          "enum": ["avg", "max", "p95"]
+        },
+        "equals": {},
+        "notEquals": {},
+        "greaterThan": { "type": "number" },
+        "lessThan": { "type": "number" },
+        "atLeast": { "type": "number" },
+        "atMost": { "type": "number" }
+      },
+      "description": "依赖 profile-start/profile-stop 产出的 metrics.jsonl（位于 session artifacts 目录）；aggregate 缺省为 avg。未先执行过 profile-start/profile-stop（或该指标在本机不可用）时引擎返回 metric_not_available。"
+    }
+  }
+}

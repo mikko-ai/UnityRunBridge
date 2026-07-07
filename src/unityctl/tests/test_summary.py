@@ -272,3 +272,110 @@ def test_build_summary_propagates_session_level_failure_even_without_log_problem
     assert summary["status"] == "failed"
     assert summary["failedReason"] == "timeout"
     assert summary["hasProblems"] is False
+
+
+def test_build_summary_embeds_scenario_section_when_provided(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None, "status": "stopped"}),
+        encoding="utf-8",
+    )
+    write_jsonl(session / "unity-console.jsonl", [])
+
+    scenario_result = {
+        "name": "login-flow",
+        "stepsTotal": 3,
+        "stepsPassed": 3,
+        "stepsFailed": 0,
+        "assertions": [
+            {"id": "login-log", "status": "passed", "expected": {}, "actual": {}, "evidence": None}
+        ],
+    }
+
+    summary = build_summary(session, rules={"ignore": []}, scenario_result=scenario_result)
+
+    assert summary["status"] == "passed"
+    assert summary["scenario"] == {
+        "name": "login-flow",
+        "stepsTotal": 3,
+        "stepsPassed": 3,
+        "stepsFailed": 0,
+        "assertions": scenario_result["assertions"],
+    }
+
+
+def test_build_summary_marks_status_failed_when_scenario_has_failed_steps(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None, "status": "stopped"}),
+        encoding="utf-8",
+    )
+    write_jsonl(session / "unity-console.jsonl", [])
+
+    scenario_result = {
+        "name": "login-flow",
+        "stepsTotal": 3,
+        "stepsPassed": 2,
+        "stepsFailed": 1,
+        "assertions": [],
+    }
+
+    summary = build_summary(session, rules={"ignore": []}, scenario_result=scenario_result)
+
+    assert summary["status"] == "failed"
+
+
+def test_build_summary_omits_scenario_key_when_not_provided(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(session / "unity-console.jsonl", [])
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert "scenario" not in summary
+
+
+def test_build_summary_embeds_metrics_section_when_metrics_jsonl_present(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(session / "unity-console.jsonl", [])
+    artifacts_dir = session / "artifacts"
+    artifacts_dir.mkdir()
+    write_jsonl(
+        artifacts_dir / "metrics.jsonl",
+        [
+            {"frame": 0, "time": 0.0, "frameTimeMs": 10.0, "drawCalls": 100},
+            {"frame": 1, "time": 0.1, "frameTimeMs": 20.0, "drawCalls": 200},
+        ],
+    )
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert summary["metrics"]["frameCount"] == 2
+    assert summary["metrics"]["metrics"]["frameTimeMs"]["avg"] == 15.0
+    assert summary["metrics"]["metrics"]["frameTimeMs"]["max"] == 20.0
+    assert summary["metrics"]["metrics"]["drawCalls"]["avg"] == 150.0
+
+
+def test_build_summary_omits_metrics_key_when_metrics_jsonl_absent(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(session / "unity-console.jsonl", [])
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert "metrics" not in summary

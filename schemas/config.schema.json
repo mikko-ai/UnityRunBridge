@@ -36,6 +36,75 @@
       "type": ["string", "null"],
       "description": "可选：默认打开或运行的场景路径。"
     },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "screenshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "截图能力总开关；关闭后 POST /capture/screenshot 恒返回 capture_disabled。"
+            },
+            "allowAgentRequest": {
+              "type": "boolean",
+              "default": true,
+              "description": "是否允许 agent 主动发起截图（reason=agent）；关闭后仅保留断言失败/场景步骤等被动触发路径。"
+            },
+            "onAssertFailure": {
+              "type": "boolean",
+              "default": true,
+              "description": "断言失败时是否自动截图（供 Phase 3 assert 引擎读取，v1 CaptureController 暂不消费）。"
+            },
+            "onScenarioStep": {
+              "type": "boolean",
+              "default": true,
+              "description": "scenario 每步执行后是否自动截图（供 Phase 3 run-scenario 引擎读取，v1 CaptureController 暂不消费）。"
+            },
+            "maxPerSession": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50,
+              "description": "单个 session（或无 session 时的进程生命周期）内允许的最大截图张数，超出返回 capture_quota_exceeded。"
+            },
+            "maxLongEdge": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1280,
+              "description": "输出 PNG 长边像素上限，超出按比例双线性缩小；请求可用 maxLongEdge 覆盖单次调用。"
+            },
+            "agentImageAccess": {
+              "type": "string",
+              "enum": ["allow", "deny"],
+              "default": "allow",
+              "description": "多模态模型是否被允许读取截图内容；deny 时 agent 侧应只用截图做存证/人工查看，不喂给模型。Bridge 本身不做强制，由 CLI/skill 侧约定遵守。"
+            }
+          }
+        }
+      }
+    },
+    "gameplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "gameplay command bridge 总开关。默认 false（安全默认）——invoke 是任意代码执行入口，必须由项目显式开启；关闭时 GET /gameplay/commands 与 POST /gameplay/invoke 恒返回 gameplay_disabled。"
+        },
+        "whitelist": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "白名单直调允许的完全限定方法名（Namespace.Class.Method），仅限公开静态方法。与 duck-typed attribute（AgentCommandAttribute）发现的命令是两条独立通道；默认空数组。"
+        }
+      }
+    },
     "timeouts": {
       "type": "object",
       "additionalProperties": false,
@@ -54,6 +123,11 @@
           "type": "integer",
           "minimum": 1,
           "description": "unityctl start 等待 Unity Editor 完成握手的超时时间（秒）。"
+        },
+        "buildSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "unityctl build 等待独立 batchmode 构建进程结束的超时时间（秒），默认 3600。"
         }
       }
     }

@@ -5,6 +5,7 @@ import pytest
 
 from unityctl import __version__
 from unityctl import cli
+from unityctl.build import BuildError, BuildResult
 from unityctl.client import BridgeClientError
 from unityctl.convergence import ConvergenceResult
 from unityctl.discovery import BridgeInfo, DiscoveryError
@@ -73,6 +74,100 @@ class FakeClient:
     def refresh(self):
         self.calls.append(("refresh", None))
         return {"ok": True, "code": "accepted"}
+
+    def get_capabilities(self):
+        self.calls.append(("capabilities", None))
+        return {
+            "ok": True,
+            "capabilities": [
+                "core", "hierarchy", "capture", "interaction", "gameplay", "recording", "profiling",
+            ],
+        }
+
+    def capture_screenshot(self, reason=None, max_long_edge=None, target_directory=None):
+        self.calls.append(
+            (
+                "capture/screenshot",
+                {"reason": reason, "maxLongEdge": max_long_edge, "targetDirectory": target_directory},
+            )
+        )
+        return {"ok": True, "jobId": "job-fake-1"}
+
+    def get_job(self, job_id):
+        self.calls.append(("get_job", job_id))
+        return {"job": {"id": job_id, "status": "succeeded", "result": {"path": "/tmp/fake-shot.png"}}}
+
+    def hierarchy_roots(self):
+        self.calls.append(("hierarchy/roots", None))
+        return {"ok": True, "scenes": []}
+
+    def hierarchy_tree(self, **params):
+        self.calls.append(("hierarchy/tree", params))
+        return {"ok": True, "nodes": []}
+
+    def hierarchy_find(self, **params):
+        self.calls.append(("hierarchy/find", params))
+        return {"ok": True, "matchedCount": 0, "nodes": []}
+
+    def hierarchy_ancestors(self, **params):
+        self.calls.append(("hierarchy/ancestors", params))
+        return {"ok": True, "ancestors": []}
+
+    def hierarchy_inspect(self, **params):
+        self.calls.append(("hierarchy/inspect", params))
+        return {"ok": True, "node": {}}
+
+    def interaction_click(self, path, force=False, scene=None):
+        self.calls.append(("interaction/click", {"path": path, "force": force, "scene": scene}))
+        return {"ok": True, "clicked": path, "raycastHit": path, "forced": force, "events": ["pointerDown", "pointerUp", "pointerClick"]}
+
+    def interaction_input(self, path, text, submit=False, scene=None):
+        self.calls.append(("interaction/input", {"path": path, "text": text, "submit": submit, "scene": scene}))
+        return {"ok": True, "code": "ok", "message": "input applied"}
+
+    def interaction_set_value(self, path, value, component=None, scene=None):
+        self.calls.append(
+            ("interaction/set-value", {"path": path, "value": value, "component": component, "scene": scene})
+        )
+        return {"ok": True, "component": component or "Slider"}
+
+    def gameplay_list(self):
+        self.calls.append(("gameplay/commands", None))
+        return {"ok": True, "commands": []}
+
+    def gameplay_invoke(self, command, args=None):
+        self.calls.append(("gameplay/invoke", {"command": command, "args": args or {}}))
+        return {"ok": True, "result": 101, "durationMs": 3}
+
+    def recording_start(self, target_directory=None):
+        self.calls.append(("recording/start", {"targetDirectory": target_directory}))
+        return {"ok": True, "actionsPath": "/tmp/actions.jsonl", "metaPath": "/tmp/recording-meta.json"}
+
+    def recording_stop(self):
+        self.calls.append(("recording/stop", None))
+        return {"ok": True, "actionsPath": "/tmp/actions.jsonl", "actionCount": 3, "interrupted": False}
+
+    def recording_status(self):
+        self.calls.append(("recording/status", None))
+        return {"ok": True, "recording": True, "interrupted": False, "actionCount": 3, "actionsPath": "/tmp/actions.jsonl"}
+
+    def profiling_start(self, target_directory=None):
+        self.calls.append(("profiling/start", {"targetDirectory": target_directory}))
+        return {"ok": True, "metricsPath": "/tmp/metrics.jsonl", "unavailableMetrics": []}
+
+    def profiling_stop(self):
+        self.calls.append(("profiling/stop", None))
+        return {
+            "ok": True,
+            "metricsPath": "/tmp/metrics.jsonl",
+            "frameCount": 120,
+            "interrupted": False,
+            "aggregates": {"frameTimeMs": {"avg": 16.2, "max": 41.0, "p95": 22.1}},
+        }
+
+    def profiling_status(self):
+        self.calls.append(("profiling/status", None))
+        return {"ok": True, "profiling": True, "interrupted": False, "frameCount": 42, "metricsPath": "/tmp/metrics.jsonl"}
 
 
 def patch_bridge(monkeypatch, info: BridgeInfo | None = None):
@@ -688,7 +783,7 @@ def test_init_command_requires_confirmation_when_not_yes(tmp_path, capsys):
 
     assert exit_code == 1
     output = json.loads(capsys.readouterr().err)
-    assert "需要确认" in output["error"]
+    assert "需要确认" in output["message"]
     assert not (project / ".unity-agent").exists()
 
 
@@ -1019,3 +1114,864 @@ def test_doctor_reports_all_checks(monkeypatch, tmp_path, capsys):
     assert "project_lock" in names
     # 未启动 Unity Editor 时 bridge.json 不存在，doctor 命令本身应正常返回而不是抛异常
     assert exit_code in (0, 1)
+
+
+def _make_build_result(**overrides) -> BuildResult:
+    defaults = dict(
+        ok=True,
+        build_id="20260707T000000Z-StandaloneOSX",
+        result="Succeeded",
+        report={
+            "result": "Succeeded",
+            "durationMs": 1234,
+            "outputPath": "/tmp/build/Build.app",
+            "sizeBytes": 999,
+            "errors": [],
+            "warnings": [],
+            "reportSource": "build_report",
+        },
+        report_path=Path("/tmp/build/build-report.json"),
+        log_path=Path("/tmp/build/build.log"),
+        output_path=Path("/tmp/build/Build.app"),
+        exit_code=0,
+        command=["/Unity", "-batchmode"],
+    )
+    defaults.update(overrides)
+    return BuildResult(**defaults)
+
+
+def test_build_dispatches_to_run_build_and_returns_success_payload(monkeypatch, tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    captured_kwargs = {}
+
+    def fake_run_build(**kwargs):
+        captured_kwargs.update(kwargs)
+        return _make_build_result()
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+
+    exit_code = cli.main(
+        ["--project", str(project), "build", "--target", "StandaloneOSX", "--timeout", "120"]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["ok"] is True
+    assert output["code"] == "ok"
+    assert output["result"] == "Succeeded"
+    assert output["buildId"] == "20260707T000000Z-StandaloneOSX"
+    assert captured_kwargs["target"] == "StandaloneOSX"
+    assert captured_kwargs["timeout_seconds"] == 120
+
+
+def test_build_reports_failure_without_raising(monkeypatch, tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    def fake_run_build(**kwargs):
+        return _make_build_result(
+            ok=False,
+            result="Failed",
+            report={
+                "result": "Failed",
+                "durationMs": 10,
+                "outputPath": "",
+                "sizeBytes": 0,
+                "errors": ["Assets/Broken.cs(1,1): error CS1002: ; expected"],
+                "warnings": [],
+                "reportSource": "log_fallback",
+            },
+        )
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+
+    exit_code = cli.main(["--project", str(project), "build"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output["ok"] is False
+    assert output["code"] == "build_failed"
+    assert output["reportSource"] == "log_fallback"
+
+
+def test_build_maps_build_error_to_cli_error(monkeypatch, tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    def fake_run_build(**kwargs):
+        raise BuildError("项目被占用", code="editor_running")
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+
+    exit_code = cli.main(["--project", str(project), "build"])
+
+    output = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert output["code"] == "editor_running"
+
+
+def test_health_runs_offline_checks_without_bridge(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    (project / "Packages" / "manifest.json").write_text(
+        json.dumps({"dependencies": {}}), encoding="utf-8"
+    )
+    (project / "Packages" / "packages-lock.json").write_text(
+        json.dumps({"dependencies": {}}), encoding="utf-8"
+    )
+
+    exit_code = cli.main(
+        ["--project", str(project), "health", "--check", "packages,build_scenes"]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [check["name"] for check in output["checks"]] == ["packages", "build_scenes"]
+
+
+def test_health_defaults_skip_bridge_checks_when_unreachable(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    exit_code = cli.main(["--project", str(project), "health"])
+
+    output = json.loads(capsys.readouterr().out)
+    checks_by_name = {check["name"]: check for check in output["checks"]}
+    assert checks_by_name["compilation"]["status"] == "skipped"
+    assert checks_by_name["missing_scripts"]["status"] == "skipped"
+    # skipped 不计入失败；这个临时项目里只有 build_scenes/packages 会因为文件缺失报 fail/warn。
+    assert exit_code in (0, 1)
+
+
+def test_health_rejects_unknown_check_name(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+
+    exit_code = cli.main(["--project", str(project), "health", "--check", "not_a_real_check"])
+
+    output = json.loads(capsys.readouterr().err)
+    assert exit_code == 1
+    assert output["ok"] is False
+
+
+def test_hierarchy_roots_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "hierarchy", "roots"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert ("hierarchy/roots", None) in clients[0].calls
+
+
+def test_hierarchy_tree_passes_path_and_options(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "hierarchy", "tree", "MainCanvas/Button", "--depth", "2", "--page-size", "10"]
+    )
+
+    assert exit_code == 0
+    call_path, params = clients[0].calls[-1]
+    assert call_path == "hierarchy/tree"
+    assert params["path"] == "MainCanvas/Button"
+    assert params["depth"] == 2
+    assert params["pageSize"] == 10
+
+
+def test_hierarchy_find_passes_all_filters(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "hierarchy",
+            "find",
+            "--component",
+            "Button",
+            "--active-only",
+            "--sort-by",
+            "Canvas.sortingOrder",
+            "--desc",
+            "--count",
+        ]
+    )
+
+    assert exit_code == 0
+    call_path, params = clients[0].calls[-1]
+    assert call_path == "hierarchy/find"
+    assert params["component"] == "Button"
+    assert params["active"] == "only"
+    assert params["sortBy"] == "Canvas.sortingOrder"
+    assert params["order"] == "desc"
+    assert params["countOnly"] is True
+
+
+def test_hierarchy_ancestors_and_inspect_dispatch(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    cli.main(["--project", str(tmp_path), "hierarchy", "ancestors", "A/B", "--component", "Canvas"])
+    cli.main(["--project", str(tmp_path), "hierarchy", "inspect", "A/B"])
+    capsys.readouterr()
+
+    assert ("hierarchy/ancestors", {"path": "A/B", "scene": None, "component": "Canvas"}) in clients[0].calls
+    assert ("hierarchy/inspect", {"path": "A/B", "scene": None}) in clients[1].calls
+
+
+def test_hierarchy_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "hierarchy", "roots"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+class _FakeCapabilitiesClient:
+    def __init__(self, capabilities):
+        self._capabilities = capabilities
+
+    def get_capabilities(self):
+        return {"ok": True, "capabilities": self._capabilities}
+
+
+def test_require_capability_passes_when_present():
+    client = _FakeCapabilitiesClient(["core", "hierarchy"])
+    cli._require_capability(client, "hierarchy")  # 不应抛异常
+
+
+def test_require_capability_raises_when_missing():
+    client = _FakeCapabilitiesClient(["core"])
+    with pytest.raises(cli.CliError) as exc:
+        cli._require_capability(client, "hierarchy")
+    assert exc.value.code == "bridge_capability_missing"
+    assert "hierarchy" in str(exc.value)
+
+
+def test_snapshot_dispatches_and_waits_for_job(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    def fake_wait_for_job(project_path, job_id, timeout_seconds, poll_interval=0.5, initial_info=None, raise_on_failure=True):
+        assert job_id == "job-fake-1"
+        return {"id": job_id, "status": "succeeded", "result": {"path": "/tmp/shot.png", "width": 640, "height": 360}}
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(["--project", str(tmp_path), "snapshot", "--reason", "assert_failure"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["path"] == "/tmp/shot.png"
+    assert output["width"] == 640
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "capture/screenshot"
+    assert payload["reason"] == "assert_failure"
+
+
+def test_snapshot_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "snapshot"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+def test_snapshot_job_failure_surfaces_error_code(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def fake_wait_for_job(project_path, job_id, timeout_seconds, poll_interval=0.5, initial_info=None, raise_on_failure=True):
+        raise cli.JobFailed({"errorCode": "capture_failed", "errorMessage": "boom"})
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(["--project", str(tmp_path), "snapshot"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "capture_failed"
+    assert output["message"] == "boom"
+
+
+def test_snapshot_start_failure_raises_cli_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def denied_capture(self, reason=None, max_long_edge=None, target_directory=None):
+        return {"ok": False, "code": "capture_disabled", "message": "disabled"}
+
+    monkeypatch.setattr(FakeClient, "capture_screenshot", denied_capture)
+
+    exit_code = cli.main(["--project", str(tmp_path), "snapshot"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "capture_disabled"
+
+
+def test_click_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "click", "MainCanvas/StartButton", "--force"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["forced"] is True
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "interaction/click"
+    assert payload == {"path": "MainCanvas/StartButton", "force": True, "scene": None}
+
+
+def test_click_occluded_failure_surfaces_as_nonzero_exit(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def occluded(self, path, force=False, scene=None):
+        return {"ok": False, "code": "occluded", "message": "点击被遮挡", "blockedBy": "MainCanvas/Overlay"}
+
+    monkeypatch.setattr(FakeClient, "interaction_click", occluded)
+
+    exit_code = cli.main(["--project", str(tmp_path), "click", "MainCanvas/StartButton"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "occluded"
+    assert output["blockedBy"] == "MainCanvas/Overlay"
+
+
+def test_click_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "click", "MainCanvas/StartButton"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+def test_input_dispatches_text_and_submit(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "input", "MainCanvas/NameField", "--text", "Alice", "--submit"]
+    )
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "interaction/input"
+    assert payload == {"path": "MainCanvas/NameField", "text": "Alice", "submit": True, "scene": None}
+
+
+def test_set_value_parses_numeric_json_value(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "set-value", "MainCanvas/VolumeSlider", "--value", "0.5", "--component", "Slider"]
+    )
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "interaction/set-value"
+    assert payload == {"path": "MainCanvas/VolumeSlider", "value": 0.5, "component": "Slider", "scene": None}
+
+
+def test_set_value_parses_object_json_value(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "set-value",
+            "MainCanvas/Scroll",
+            "--value",
+            '{"x": 0.5, "y": 0.2}',
+            "--component",
+            "ScrollRect",
+        ]
+    )
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert payload["value"] == {"x": 0.5, "y": 0.2}
+
+
+def test_set_value_falls_back_to_raw_string_on_invalid_json(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "set-value", "MainCanvas/Field", "--value", "not-json", "--component", "Dropdown"]
+    )
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert payload["value"] == "not-json"
+
+
+def test_parse_value_arg_handles_bool_and_json_decode_error():
+    assert cli._parse_value_arg("true") is True
+    assert cli._parse_value_arg("not-json") == "not-json"
+
+
+def test_gameplay_list_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "gameplay", "list"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert ("gameplay/commands", None) in clients[0].calls
+
+
+def test_gameplay_invoke_parses_args_json(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "gameplay", "invoke", "CheatManager.AddGold", "--args", '{"amount": 100}']
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["result"] == 101
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "gameplay/invoke"
+    assert payload == {"command": "CheatManager.AddGold", "args": {"amount": 100}}
+
+
+def test_gameplay_invoke_without_args_defaults_to_empty_object(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "gameplay", "invoke", "CheatManager.Reset"])
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert payload == {"command": "CheatManager.Reset", "args": {}}
+
+
+def test_gameplay_invoke_invalid_json_args_raises_cli_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "gameplay", "invoke", "CheatManager.AddGold", "--args", "not-json"]
+    )
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_argument"
+
+
+def test_gameplay_invoke_non_object_args_raises_cli_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "gameplay", "invoke", "CheatManager.AddGold", "--args", "[1, 2]"]
+    )
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_argument"
+
+
+def test_gameplay_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "gameplay", "list"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+def test_gameplay_invoke_failure_surfaces_as_nonzero_exit(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def disabled(self, command, args=None):
+        return {"ok": False, "code": "gameplay_disabled", "message": "disabled"}
+
+    monkeypatch.setattr(FakeClient, "gameplay_invoke", disabled)
+
+    exit_code = cli.main(["--project", str(tmp_path), "gameplay", "invoke", "Foo.Bar"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "gameplay_disabled"
+
+
+def test_record_start_dispatches_without_target_directory_by_default(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "start"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert ("recording/start", {"targetDirectory": None}) in clients[0].calls
+
+
+def test_record_start_with_latest_resolves_session_artifacts_directory(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"
+    session.mkdir(parents=True)
+
+    exit_code = cli.main(["--project", str(project), "record", "start", "--latest"])
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "recording/start"
+    assert payload == {"targetDirectory": str(session / "artifacts")}
+
+
+def test_record_start_with_session_path_resolves_artifacts_directory(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    session = tmp_path / "some-session"
+    session.mkdir()
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "record", "start", "--session-path", str(session)]
+    )
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "recording/start"
+    assert payload == {"targetDirectory": str(session / "artifacts")}
+
+
+def test_record_start_with_target_directory_and_latest_raises_invalid_argument(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"
+    session.mkdir(parents=True)
+
+    exit_code = cli.main(
+        ["--project", str(project), "record", "start", "--latest", "--target-directory", "/tmp/whatever"]
+    )
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_argument"
+
+
+def test_record_stop_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "stop"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["actionCount"] == 3
+    assert ("recording/stop", None) in clients[0].calls
+
+
+def test_record_status_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "status"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["recording"] is True
+    assert ("recording/status", None) in clients[0].calls
+
+
+def test_record_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "status"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+def test_record_start_failure_surfaces_as_nonzero_exit(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def already_recording(self, target_directory=None):
+        return {"ok": False, "code": "already_recording", "message": "already recording"}
+
+    monkeypatch.setattr(FakeClient, "recording_start", already_recording)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "start"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "already_recording"
+
+
+def test_profile_start_dispatches_without_target_directory_by_default(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "profile", "start"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert ("profiling/start", {"targetDirectory": None}) in clients[0].calls
+
+
+def test_profile_start_with_latest_resolves_session_artifacts_directory(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"
+    session.mkdir(parents=True)
+
+    exit_code = cli.main(["--project", str(project), "profile", "start", "--latest"])
+
+    assert exit_code == 0
+    call_path, payload = clients[0].calls[-1]
+    assert call_path == "profiling/start"
+    assert payload == {"targetDirectory": str(session / "artifacts")}
+
+
+def test_profile_start_with_target_directory_and_latest_raises_invalid_argument(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"
+    session.mkdir(parents=True)
+
+    exit_code = cli.main(
+        ["--project", str(project), "profile", "start", "--latest", "--target-directory", "/tmp/whatever"]
+    )
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_argument"
+
+
+def test_profile_stop_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "profile", "stop"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["frameCount"] == 120
+    assert output["aggregates"]["frameTimeMs"]["avg"] == 16.2
+    assert ("profiling/stop", None) in clients[0].calls
+
+
+def test_profile_status_dispatches_to_client(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "profile", "status"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["profiling"] is True
+    assert ("profiling/status", None) in clients[0].calls
+
+
+def test_profile_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "profile", "status"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+
+
+def test_profile_start_failure_surfaces_as_nonzero_exit(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+
+    def already_profiling(self, target_directory=None):
+        return {"ok": False, "code": "already_profiling", "message": "already profiling"}
+
+    monkeypatch.setattr(FakeClient, "profiling_start", already_profiling)
+
+    exit_code = cli.main(["--project", str(tmp_path), "profile", "start"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "already_profiling"
+
+
+def test_scenario_validate_reports_errors_for_invalid_file(tmp_path, capsys):
+    scenario_file = tmp_path / "bad.json"
+    scenario_file.write_text(json.dumps({"steps": []}), encoding="utf-8")
+
+    exit_code = cli.main(["scenario", "validate", str(scenario_file)])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_scenario"
+    assert len(output["errors"]) >= 1
+
+
+def test_scenario_validate_passes_for_well_formed_scenario(tmp_path, capsys):
+    scenario_file = tmp_path / "good.json"
+    scenario_file.write_text(
+        json.dumps({"name": "x", "steps": [{"action": "play"}, {"action": "stop"}]}), encoding="utf-8"
+    )
+
+    exit_code = cli.main(["scenario", "validate", str(scenario_file)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["errors"] == []
+
+
+def test_scenario_from_recording_writes_draft_file(tmp_path, capsys):
+    actions_file = tmp_path / "actions.jsonl"
+    meta_file = tmp_path / "recording-meta.json"
+    meta_file.write_text(json.dumps({"activeScene": "Main", "sessionId": "s1"}), encoding="utf-8")
+    actions_file.write_text(
+        json.dumps(
+            {
+                "time": 0.1,
+                "frame": 1,
+                "type": "click",
+                "scene": "Main",
+                "path": "A/B",
+                "screenPos": {"x": 1, "y": 2},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "draft.json"
+
+    exit_code = cli.main(["scenario", "from-recording", str(actions_file), "-o", str(output_file)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["outputPath"] == str(output_file)
+    assert output_file.exists()
+    written = json.loads(output_file.read_text(encoding="utf-8"))
+    assert written["steps"][0] == {"action": "open-scene", "scene": "Main"}
+    assert written["steps"][-1] == {"action": "stop"}
+
+
+def test_scenario_from_recording_requires_meta_file(tmp_path, capsys):
+    actions_file = tmp_path / "actions.jsonl"
+    actions_file.write_text("", encoding="utf-8")
+
+    exit_code = cli.main(["scenario", "from-recording", str(actions_file)])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_scenario"
+
+
+def _write_scenario_file(path, gold_expectation):
+    path.write_text(
+        json.dumps(
+            {
+                "name": "cli-integration",
+                "steps": [
+                    {"action": "click", "path": "A/Button"},
+                    {
+                        "action": "assert",
+                        "id": "gold",
+                        "gameplay": {"command": "Cheat.AddGold", "equals": gold_expectation},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_scenario_run_creates_session_and_writes_artifacts(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    scenario_file = project / "login-flow.json"
+    # FakeClient.gameplay_invoke 固定返回 result=101。
+    _write_scenario_file(scenario_file, gold_expectation=101)
+
+    exit_code = cli.main(["--project", str(project), "scenario", "run", str(scenario_file)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["scenario"]["status"] == "passed"
+    assert output["scenario"]["stepsFailed"] == 0
+    assert output["summary"]["scenario"]["name"] == "cli-integration"
+    assert output["summary"]["status"] == "passed"
+
+    session_path = Path(output["sessionPath"])
+    assert (session_path / "artifacts" / "scenario-result.json").exists()
+    assert (session_path / "summary.json").exists()
+
+
+def test_scenario_run_exit_code_1_when_assertion_fails(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    scenario_file = project / "login-flow.json"
+    _write_scenario_file(scenario_file, gold_expectation=999)
+
+    exit_code = cli.main(["--project", str(project), "scenario", "run", str(scenario_file)])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is False
+    assert output["code"] == "scenario_failed"
+    assert output["scenario"]["status"] == "failed"
+    assert output["scenario"]["stepsFailed"] == 1
+    assert output["summary"]["status"] == "failed"
+
+
+def test_scenario_run_invalid_scenario_raises_before_creating_session(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    scenario_file = project / "bad.json"
+    scenario_file.write_text(json.dumps({"name": "x", "steps": [{"action": "teleport"}]}), encoding="utf-8")
+
+    exit_code = cli.main(["--project", str(project), "scenario", "run", str(scenario_file)])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "invalid_scenario"
+    assert not (project / ".unity-agent" / "sessions").exists()

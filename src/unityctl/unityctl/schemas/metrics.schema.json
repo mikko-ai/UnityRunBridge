@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/metrics.schema.json",
+  "title": "Unity Agent Bridge Profiling Metrics",
+  "description": "profiling/start 到 profiling/stop 期间产出的逐帧采样文件（JSON Lines，一行一帧）。每 60 帧批量落盘一次；计数器在当前 Unity 版本/渲染管线下不可用时该行不含对应字段（缺失，不是 0）。绝对值含 Editor 开销，不代表真机性能，只用于同机同项目改动前后的相对回归比较。",
+  "type": "object",
+  "required": ["frame", "time"],
+  "properties": {
+    "frame": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Time.frameCount。"
+    },
+    "time": {
+      "type": "number",
+      "minimum": 0,
+      "description": "相对本次采样开始（profiling/start）的秒数。"
+    },
+    "frameTimeMs": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Internal / \"CPU Main Thread Frame Time\"，纳秒转毫秒。"
+    },
+    "gcAllocBytes": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Memory / \"GC Allocated In Frame\"。"
+    },
+    "drawCalls": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Render / \"Draw Calls Count\"。"
+    },
+    "setPassCalls": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Render / \"SetPass Calls Count\"。"
+    },
+    "triangles": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Render / \"Triangles Count\"。"
+    },
+    "totalMemoryBytes": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Memory / \"Total Used Memory\"。"
+    },
+    "gcMemoryBytes": {
+      "type": "number",
+      "minimum": 0,
+      "description": "ProfilerCategory.Memory / \"GC Used Memory\"。"
+    }
+  }
+}

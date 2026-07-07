@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/recording-meta.schema.json",
+  "title": "Unity Agent Bridge 录制元数据（recording-meta.json）",
+  "description": "POST /recording/start 时写入，记录录制开始时刻的环境快照。Phase 3 的 scenario from-recording 依赖它生成 open-scene 步骤，不能只靠 actions.jsonl 的动作行倒推场景信息。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "startedAt", "activeScene", "loadedScenes", "screenSize", "sessionId"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "startedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$",
+      "description": "录制开始时间，ISO8601 UTC 时间戳。"
+    },
+    "activeScene": {
+      "type": "string",
+      "description": "录制开始时的 active scene 名。"
+    },
+    "loadedScenes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "录制开始时所有已加载场景名（多场景 additive 加载时包含全部）。"
+    },
+    "screenSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["w", "h"],
+      "properties": {
+        "w": { "type": "integer", "minimum": 1 },
+        "h": { "type": "integer", "minimum": 1 }
+      },
+      "description": "录制开始时的 Game View 分辨率（像素）。"
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "录制开始时关联的 session id；没有活动 session 时为空字符串。"
+    }
+  }
+}

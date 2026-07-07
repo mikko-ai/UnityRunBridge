@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/scenario-result.schema.json",
+  "title": "Unity Agent Bridge Scenario Result",
+  "description": "unityctl scenario run 的执行结果，落盘为 session 的 artifacts/scenario-result.json，同时精简并入 summary.json 的 scenario 段。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "description", "status", "stepsTotal", "stepsPassed", "stepsFailed", "stepsSkipped", "steps", "assertions"],
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "failed"],
+      "description": "任何一步 failed 即整体 failed（continueOnFailure 的步骤也计入 stepsFailed）。"
+    },
+    "stepsTotal": { "type": "integer", "minimum": 0 },
+    "stepsPassed": { "type": "integer", "minimum": 0 },
+    "stepsFailed": { "type": "integer", "minimum": 0 },
+    "stepsSkipped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "因某步失败且 continueOnFailure=false 而被跳过的后续步骤数。"
+    },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/stepResult" }
+    },
+    "assertions": {
+      "type": "array",
+      "description": "steps 中 action=assert 的结果摘要，供 summary.scenario.assertions 直接复用。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "expected", "actual", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+          "expected": {},
+          "actual": {},
+          "evidence": { "type": ["object", "null"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stepIndex", "action", "id", "status", "failureType", "durationMs", "evidence"],
+      "properties": {
+        "stepIndex": { "type": "integer", "minimum": 0 },
+        "action": { "type": "string" },
+        "id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped"]
+        },
+        "failureType": {
+          "type": ["string", "null"],
+          "enum": ["timeout", "assertion_failed", "execution_error", null]
+        },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "evidence": {
+          "description": "失败证据或成功时的判定摘要；具体形状取决于 action/source，见 SKILL.md。",
+          "type": ["object", "null"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/build-report.schema.json",
+  "title": "Unity Agent Bridge Build Report",
+  "description": "unityctl build 产出的构建报告，写在 .unity-agent/builds/<buildId>/build-report.json。正常情况下由独立 batchmode Unity 进程内的 BuildRunner 写出；BuildRunner 从未跑起来（多半是编译错误）时由 CLI 从 build.log 兜底解析生成，此时 reportSource 为 log_fallback 且不含 durationMs/outputPath/sizeBytes 的真实值。",
+  "type": "object",
+  "required": ["result", "errors", "warnings"],
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": ["Succeeded", "Failed", "Cancelled"],
+      "description": "对应 BuildReport.summary.result；log_fallback 报告固定为 Failed。"
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0,
+      "description": "BuildRunner 从开始调用 BuildPipeline.BuildPlayer 到返回的耗时（毫秒）。"
+    },
+    "outputPath": {
+      "type": "string",
+      "description": "对应 BuildReport.summary.outputPath（构建产物路径）。"
+    },
+    "sizeBytes": {
+      "type": "number",
+      "minimum": 0,
+      "description": "对应 BuildReport.summary.totalSize。"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "从 BuildReport.steps[].messages 里 LogType 为 Error/Exception/Assert 的消息内容提取；log_fallback 时是从 build.log 匹配到的 CS 编译错误行（或一条兜底说明）。"
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "从 BuildReport.steps[].messages 里 LogType 为 Warning 的消息内容提取；log_fallback 时恒为空数组。"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "durationMs"],
+        "properties": {
+          "name": { "type": "string" },
+          "durationMs": { "type": "number", "minimum": 0 }
+        }
+      },
+      "description": "对应 BuildReport.steps（构建各阶段耗时）；log_fallback 时不存在该字段。"
+    },
+    "reportSource": {
+      "type": "string",
+      "enum": ["build_report", "log_fallback"],
+      "description": "build_report：BuildRunner 正常写出的报告；log_fallback：报告缺失，CLI 从 build.log 兜底解析。"
+    }
+  }
+}

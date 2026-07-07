@@ -10,12 +10,15 @@ LOCAL_CONFIG_FILENAME = "config.local.json"
 BRIDGE_INFO_FILENAME = "bridge.json"
 SCHEMAS_DIRNAME = "schemas"
 SESSIONS_DIRNAME = "sessions"
+SCRATCH_DIRNAME = "scratch"
+BUILDS_DIRNAME = "builds"
 
 BRIDGE_HOST = "127.0.0.1"
 DEFAULT_PREFERRED_PORT = 17890
 DEFAULT_PLAY_TIMEOUT_SECONDS = 180
 DEFAULT_STOP_TIMEOUT_SECONDS = 60
 DEFAULT_START_EDITOR_TIMEOUT_SECONDS = 300
+DEFAULT_BUILD_TIMEOUT_SECONDS = 3600
 
 UNITY_AGENT_BRIDGE_PACKAGE_ID = "com.mk.unity-agent-bridge"
 UNITY_AGENT_BRIDGE_GIT_URL = "https://github.com/mikko-ai/UnityRunBridge.git"
@@ -29,6 +32,12 @@ SCHEMA_FILENAMES = (
     "summary.schema.json",
     "log-rules.schema.json",
     "unity-console-log.schema.json",
+    "actions.schema.json",
+    "recording-meta.schema.json",
+    "scenario.schema.json",
+    "scenario-result.schema.json",
+    "metrics.schema.json",
+    "build-report.schema.json",
 )
 
 
@@ -41,6 +50,7 @@ class Timeouts:
     play_seconds: int = DEFAULT_PLAY_TIMEOUT_SECONDS
     stop_seconds: int = DEFAULT_STOP_TIMEOUT_SECONDS
     start_editor_seconds: int = DEFAULT_START_EDITOR_TIMEOUT_SECONDS
+    build_seconds: int = DEFAULT_BUILD_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -193,6 +203,12 @@ def init_project_config(
     updated_bridge_ignore = append_gitignore_entry(
         gitignore_path, f".unity-agent/{BRIDGE_INFO_FILENAME}"
     )
+    updated_scratch_ignore = append_gitignore_entry(
+        gitignore_path, f".unity-agent/{SCRATCH_DIRNAME}/"
+    )
+    updated_builds_ignore = append_gitignore_entry(
+        gitignore_path, f".unity-agent/{BUILDS_DIRNAME}/"
+    )
 
     effective = resolve_effective_config(project_path=project)
 
@@ -204,7 +220,13 @@ def init_project_config(
         package_installed=is_bridge_package_installed(project),
         created_paths=created_paths,
         kept_paths=kept_paths,
-        updated_ignore=updated_local_ignore or updated_sessions_ignore or updated_bridge_ignore,
+        updated_ignore=(
+            updated_local_ignore
+            or updated_sessions_ignore
+            or updated_bridge_ignore
+            or updated_scratch_ignore
+            or updated_builds_ignore
+        ),
     )
 
 
@@ -245,6 +267,7 @@ def resolve_effective_config(
         start_editor_seconds=int(
             raw_timeouts.get("startEditorSeconds", DEFAULT_START_EDITOR_TIMEOUT_SECONDS)
         ),
+        build_seconds=int(raw_timeouts.get("buildSeconds", DEFAULT_BUILD_TIMEOUT_SECONDS)),
     )
 
     return EffectiveConfig(
@@ -330,6 +353,8 @@ def validate_project_config(project_path: str | Path) -> ValidationResult:
         errors.append(ValidationIssue("config.timeouts.stopSeconds", "必须为正整数"))
     if effective.timeouts.start_editor_seconds <= 0:
         errors.append(ValidationIssue("config.timeouts.startEditorSeconds", "必须为正整数"))
+    if effective.timeouts.build_seconds <= 0:
+        errors.append(ValidationIssue("config.timeouts.buildSeconds", "必须为正整数"))
 
     if effective.unity_version is None:
         warnings.append(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from unityctl import __version__
+from unityctl.build import BuildError, run_build
 from unityctl.client import BridgeClient, BridgeClientError
 from unityctl.config import (
     ConfigError,
@@ -38,6 +39,16 @@ from unityctl.discovery import (
     read_bridge_info,
 )
 from unityctl.editor import start_editor
+from unityctl.health import HealthError, run_health
+from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
+from unityctl.scenario import (
+    ScenarioContext,
+    ScenarioValidationError,
+    convert_recording_to_scenario,
+    load_scenario,
+    run_scenario,
+    validate_scenario,
+)
 from unityctl.session import (
     create_session,
     format_time,
@@ -74,8 +85,8 @@ def _add_project_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_session_options(parser: argparse.ArgumentParser) -> None:
-    session = parser.add_mutually_exclusive_group(required=True)
+def _add_session_options(parser: argparse.ArgumentParser, required: bool = True) -> None:
+    session = parser.add_mutually_exclusive_group(required=required)
     session.add_argument(
         "--session-path",
         metavar="PATH",
@@ -102,6 +113,18 @@ def build_parser() -> argparse.ArgumentParser:
             "  unityctl start\n"
             "  unityctl play --session login-flow --scene Assets/Scenes/Login.unity\n"
             "  unityctl stop --latest\n"
+            "  unityctl click MainCanvas/StartButton\n"
+            "  unityctl input MainCanvas/NameField --text \"Alice\" --submit\n"
+            "  unityctl set-value MainCanvas/VolumeSlider --value 0.5\n"
+            "  unityctl gameplay list\n"
+            "  unityctl record start --latest\n"
+            "  unityctl record stop\n"
+            "  unityctl profile start --latest\n"
+            "  unityctl profile stop\n"
+            "  unityctl scenario validate login-flow.json\n"
+            "  unityctl scenario run login-flow.json\n"
+            "  unityctl build --target StandaloneOSX\n"
+            "  unityctl health\n"
             "  unityctl doctor\n"
             "\n"
             "使用 unityctl <命令> --help 查看单个命令的详细参数。"
@@ -438,6 +461,415 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_project_option(doctor)
 
+    build = subparsers.add_parser(
+        "build",
+        help="独立 batchmode 进程构建 Player（不经过 Bridge）",
+        description=(
+            "spawn 一个新的 Unity batchmode 进程执行构建，与正在运行、供交互调试的 Editor 实例"
+            "完全独立；两者不能同时持有同一个项目，构建前会检测 Temp/UnityLockfile 是否被占用。"
+            "构建目标用 Unity 原生 -buildTarget 传递，报告写在 "
+            ".unity-agent/builds/<buildId>/build-report.json。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(build)
+    build.add_argument(
+        "--target",
+        metavar="TARGET",
+        help="Unity 原生 BuildTarget 名，例如 StandaloneOSX/StandaloneWindows64/Android/iOS/WebGL；"
+        "缺省使用项目当前 active build target（省略 -buildTarget 参数）",
+    )
+    build.add_argument(
+        "--output",
+        dest="output_path",
+        metavar="PATH",
+        help="构建产物路径（含文件名，平台相关扩展名需自己给对，如 .app/.exe/.apk）；"
+        "缺省写到 .unity-agent/builds/<buildId>/Build/ 下按 target 推断的默认文件名",
+    )
+    build.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待构建进程结束的超时时间（秒），默认读取 config.json 的 timeouts.buildSeconds（3600）",
+    )
+
+    health = subparsers.add_parser(
+        "health",
+        help="项目健康检查（编译/缺失脚本/构建场景列表/包一致性）",
+        description=(
+            "doctor 回答『环境能不能跑』，health 回答『项目干不干净』：默认跑全部检查项，"
+            "可用 --check 只跑指定项。需要 Bridge 的检查项在 Bridge 不可达时标记为 skipped 并说明原因，"
+            "不计入整体失败。退出码：pass/warn 为 0，fail 为 1（CI 门禁友好）。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(health)
+    health.add_argument(
+        "--check",
+        metavar="NAME[,NAME...]",
+        help="只运行指定检查项（逗号分隔），可选：compilation,missing_scripts,build_scenes,packages；"
+        "缺省运行全部",
+    )
+    health.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="compilation 检查等待编译完成、missing_scripts 检查等待 prefab 扫描 job 完成的超时时间（秒）",
+    )
+
+    hierarchy = subparsers.add_parser(
+        "hierarchy",
+        help="查询场景 Hierarchy 结构（只读）",
+        description="通过 Bridge 的 /hierarchy/* 端点查询场景树，输出原样为 Bridge 的 JSON 信封。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(hierarchy)
+    hierarchy_subparsers = hierarchy.add_subparsers(
+        dest="hierarchy_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    hierarchy_subparsers.add_parser(
+        "roots",
+        help="列出所有已加载场景（含 DontDestroyOnLoad）的根节点",
+        formatter_class=_HelpFormatter,
+    )
+
+    hierarchy_tree = hierarchy_subparsers.add_parser(
+        "tree",
+        help="从指定节点向下遍历子树",
+        formatter_class=_HelpFormatter,
+    )
+    hierarchy_tree.add_argument("path", help="节点 path 或 instanceId（纯数字视为 instanceId）")
+    hierarchy_tree.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    hierarchy_tree.add_argument("--depth", type=int, default=3, help="向下遍历层数，-1 为不限层")
+    hierarchy_tree.add_argument("--page-size", type=int, dest="page_size", help="单页节点数（默认 50，上限 500）")
+    hierarchy_tree.add_argument("--cursor", help="续扫游标（上次响应的 nextCursor）")
+
+    hierarchy_find = hierarchy_subparsers.add_parser(
+        "find",
+        help="按过滤条件搜索节点（全 AND 组合）",
+        formatter_class=_HelpFormatter,
+    )
+    hierarchy_find.add_argument("--name", help="精确匹配节点名")
+    hierarchy_find.add_argument("--name-contains", dest="nameContains", help="节点名包含子串（不区分大小写）")
+    hierarchy_find.add_argument("--name-regex", dest="nameRegex", help="节点名匹配 .NET 正则")
+    hierarchy_find.add_argument("--path-glob", dest="pathGlob", help="path 通配（* 匹配一段，** 匹配多段）")
+    hierarchy_find.add_argument("--component", help="组件短名或 FQN（含派生类）")
+    hierarchy_find.add_argument("--interface", help="接口短名或 FQN（任一组件实现即匹配）")
+    hierarchy_find.add_argument("--missing-script", dest="missingScript", action="store_true", help="只要含缺失脚本引用的节点")
+    hierarchy_find.add_argument("--tag", help="按 tag 过滤")
+    hierarchy_find.add_argument("--layer", help="按 layer 过滤（名字或数字）")
+    hierarchy_find.add_argument("--under", help="限定子树的 path 或 instanceId")
+    hierarchy_find.add_argument("--scene", help="限定场景名（含 DontDestroyOnLoad）")
+    active_group = hierarchy_find.add_mutually_exclusive_group()
+    active_group.add_argument("--active-only", dest="active", action="store_const", const="only", help="只要 activeInHierarchy 的节点")
+    active_group.add_argument("--inactive-only", dest="active", action="store_const", const="none", help="只要非 activeInHierarchy 的节点")
+    hierarchy_find.add_argument("--text-contains", dest="textContains", help="Text/TMP 文本包含子串（不区分大小写）")
+    hierarchy_find.add_argument("--where", help="受限属性过滤：Component.property<op>value，op 为 = != > < >= <=")
+    hierarchy_find.add_argument("--sort-by", dest="sortBy", metavar="Component.prop", help="按属性排序（在分页前）")
+    hierarchy_find.add_argument("--desc", action="store_true", help="配合 --sort-by 降序排序")
+    hierarchy_find.add_argument("--count", dest="countOnly", action="store_true", help="只返回命中数量，不返回节点列表")
+    hierarchy_find.add_argument("--page-size", type=int, dest="page_size", help="单页节点数（默认 50，上限 500）")
+    hierarchy_find.add_argument("--cursor", help="续扫游标（上次响应的 nextCursor）")
+
+    hierarchy_ancestors = hierarchy_subparsers.add_parser(
+        "ancestors",
+        help="列出目标节点的祖先（近到远）",
+        formatter_class=_HelpFormatter,
+    )
+    hierarchy_ancestors.add_argument("path", help="节点 path 或 instanceId")
+    hierarchy_ancestors.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    hierarchy_ancestors.add_argument("--component", help="只返回含该组件（含派生类）的祖先")
+
+    hierarchy_inspect = hierarchy_subparsers.add_parser(
+        "inspect",
+        help="查看目标节点的完整组件/属性详情",
+        formatter_class=_HelpFormatter,
+    )
+    hierarchy_inspect.add_argument("path", help="节点 path 或 instanceId")
+    hierarchy_inspect.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    snapshot = subparsers.add_parser(
+        "snapshot",
+        help="截取 Game View 截图（需 Play Mode）",
+        description=(
+            "通过 Bridge 的异步 job 截取当前 Game View 画面，落盘为 PNG 并等待 job 完成。"
+            "受 config.json 中 capture.screenshot 配置项管控（总开关/配额/最大边长/agent 权限）。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(snapshot)
+    snapshot.add_argument(
+        "--reason",
+        default="agent",
+        help="截图触发原因，写入 capture 配额统计维度（默认 agent，即 agent 主动发起）",
+    )
+    snapshot.add_argument(
+        "--max-long-edge",
+        type=int,
+        dest="max_long_edge",
+        metavar="PIXELS",
+        help="覆盖 config.json 中 capture.screenshot.maxLongEdge（单次调用生效）",
+    )
+    snapshot.add_argument(
+        "--target-directory",
+        dest="target_directory",
+        metavar="PATH",
+        help="覆盖输出目录（必须在 .unity-agent/sessions/ 或 .unity-agent/scratch/ 之下）；默认按当前 session 自动解析",
+    )
+    snapshot.add_argument(
+        "--timeout",
+        type=float,
+        default=15.0,
+        metavar="SECONDS",
+        help="等待截图 job 完成的超时秒数",
+    )
+
+    click_cmd = subparsers.add_parser(
+        "click",
+        help="点击 UGUI 节点（需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/click 端点模拟指针点击。默认对目标节点 screenRect "
+            "中心做射线检测：被遮挡返回 occluded（并附 blockedBy 指出遮挡者），命中链上没有 "
+            "点击处理器返回 no_click_handler；--force 跳过射线检测，直接对目标节点派发事件链。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(click_cmd)
+    click_cmd.add_argument("path", help="节点 path 或 instanceId")
+    click_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="跳过射线遮挡检测，直接对目标节点派发点击事件链",
+    )
+    click_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    input_cmd = subparsers.add_parser(
+        "input",
+        help="向 InputField/TMP_InputField 写入文本（需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/input 端点设置输入框文本"
+            "（自然触发 onValueChanged）；--submit 额外触发 onEndEdit/onSubmit 并取消选中。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(input_cmd)
+    input_cmd.add_argument("path", help="节点 path 或 instanceId")
+    input_cmd.add_argument("--text", required=True, help="要写入的文本")
+    input_cmd.add_argument(
+        "--submit",
+        action="store_true",
+        help="写入后触发 onEndEdit/onSubmit 并取消选中",
+    )
+    input_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    set_value_cmd = subparsers.add_parser(
+        "set-value",
+        help="设置 Slider/Toggle/Scrollbar/Dropdown/ScrollRect 的值（需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/set-value 端点设值，经组件属性 setter 自然触发 "
+            "onValueChanged。--value 按 JSON 解析（数字/布尔/对象），"
+            "例如 --value 0.5、--value true、--value '{\"x\": 0.5, \"y\": 0.2}'。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(set_value_cmd)
+    set_value_cmd.add_argument("path", help="节点 path 或 instanceId")
+    set_value_cmd.add_argument(
+        "--value",
+        required=True,
+        help="要设置的值，JSON 字面量（数字/布尔/对象）；非法 JSON 时按裸字符串传递",
+    )
+    set_value_cmd.add_argument(
+        "--component",
+        help="显式指定组件（节点上有多个可设值组件时必填），如 Slider/Toggle/Scrollbar/Dropdown/ScrollRect",
+    )
+    set_value_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    gameplay = subparsers.add_parser(
+        "gameplay",
+        help="列出/调用零侵入 gameplay 命令（需 Play Mode，默认关闭）",
+        description=(
+            "通过 Bridge 的 /gameplay/* 端点发现并调用游戏侧暴露的命令。两条发现通道："
+            "duck-typed attribute（游戏代码用 AgentCommandAttribute 标注公开静态方法，"
+            "不依赖本包）与 config.json 里 gameplay.whitelist 配置的完全限定方法名白名单。"
+            "受 config.json 的 gameplay.enabled 总开关控制，默认 false（安全默认）。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(gameplay)
+    gameplay_subparsers = gameplay.add_subparsers(
+        dest="gameplay_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    gameplay_subparsers.add_parser(
+        "list",
+        help="列出当前可调用的命令菜单",
+        formatter_class=_HelpFormatter,
+    )
+    gameplay_invoke = gameplay_subparsers.add_parser(
+        "invoke",
+        help="调用一个命令",
+        formatter_class=_HelpFormatter,
+    )
+    gameplay_invoke.add_argument("name", help="命令名（attribute 命令的短名，或白名单里的完全限定名）")
+    gameplay_invoke.add_argument(
+        "--args",
+        default=None,
+        metavar="JSON",
+        help='参数，JSON 对象字符串，例如 \'{"amount": 100}\'（默认空对象）',
+    )
+
+    record = subparsers.add_parser(
+        "record",
+        help="录制 UGUI 语义动作（actions.jsonl，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /recording/* 端点录制点击（按 hierarchy path 记录，非坐标）与"
+            "输入框失焦，写出 actions.jsonl 与 recording-meta.json。"
+            "domain reload / 退出 Play Mode 会打断录制，stop/status 会如实报告 interrupted。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(record)
+    record_subparsers = record.add_subparsers(
+        dest="record_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    record_start = record_subparsers.add_parser(
+        "start",
+        help="开始录制",
+        formatter_class=_HelpFormatter,
+    )
+    _add_session_options(record_start, required=False)
+    record_start.add_argument(
+        "--target-directory",
+        metavar="PATH",
+        help="直接指定输出目录（须在 .unity-agent/sessions 或 .unity-agent/scratch 下）；"
+        "与 --session-path/--latest 三选一，都不给时由 Bridge 按当前 session 自动解析",
+    )
+    record_subparsers.add_parser(
+        "stop",
+        help="停止录制，返回 actionsPath/actionCount/interrupted",
+        formatter_class=_HelpFormatter,
+    )
+    record_subparsers.add_parser(
+        "status",
+        help="查询当前录制状态",
+        formatter_class=_HelpFormatter,
+    )
+
+    profile = subparsers.add_parser(
+        "profile",
+        help="采样 ProfilerRecorder 逐帧计数器（metrics.jsonl，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /profiling/* 端点采样固定计数器集（frameTimeMs/gcAllocBytes/"
+            "drawCalls/setPassCalls/triangles/totalMemoryBytes/gcMemoryBytes），写出 metrics.jsonl。"
+            "计数器在当前 Unity 版本/渲染管线下缺失时记入 unavailableMetrics，不静默返回 0。"
+            "Editor 内采样含 Editor 开销，绝对值不代表真机性能，只用于同机同项目改动前后的相对回归比较。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(profile)
+    profile_subparsers = profile.add_subparsers(
+        dest="profile_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    profile_start = profile_subparsers.add_parser(
+        "start",
+        help="开始采样",
+        formatter_class=_HelpFormatter,
+    )
+    _add_session_options(profile_start, required=False)
+    profile_start.add_argument(
+        "--target-directory",
+        metavar="PATH",
+        help="直接指定输出目录（须在 .unity-agent/sessions 或 .unity-agent/scratch 下）；"
+        "与 --session-path/--latest 三选一，都不给时由 Bridge 按当前 session 自动解析",
+    )
+    profile_subparsers.add_parser(
+        "stop",
+        help="停止采样，返回 metricsPath/frameCount/interrupted/aggregates（avg/max/p95）",
+        formatter_class=_HelpFormatter,
+    )
+    profile_subparsers.add_parser(
+        "status",
+        help="查询当前采样状态",
+        formatter_class=_HelpFormatter,
+    )
+
+    scenario = subparsers.add_parser(
+        "scenario",
+        help="运行/校验 scenario 文件，或从录制生成草稿",
+        description=(
+            "scenario 是线性步骤表：控制（open-scene/play/stop/pause/resume）+ "
+            "操作（click/input/set-value/invoke）+ 观测（screenshot/snapshot）+ "
+            "收敛（wait-for）+ 断言（assert，四选一 source：ui/log/gameplay/metric）。"
+            "run 会创建独立 session，产出 artifacts/scenario-result.json 并把断言结果并入 summary.json。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(scenario)
+    scenario_subparsers = scenario.add_subparsers(
+        dest="scenario_command",
+        required=True,
+        title="子命令",
+        metavar="SUBCOMMAND",
+    )
+    scenario_run = scenario_subparsers.add_parser(
+        "run",
+        help="执行 scenario 文件（需 Bridge 可达）",
+        formatter_class=_HelpFormatter,
+    )
+    scenario_run.add_argument("file", metavar="FILE", help="scenario JSON 文件路径")
+    scenario_run.add_argument(
+        "--session",
+        dest="session_name",
+        metavar="NAME",
+        help="session 名字（默认取 scenario 的 name 字段）",
+    )
+    scenario_run.add_argument(
+        "--timeout-scale",
+        type=float,
+        default=1.0,
+        metavar="F",
+        help="全局缩放 wait-for/assert/收敛等待的超时秒数（CI 环境偏慢时可调大）",
+    )
+
+    scenario_validate = scenario_subparsers.add_parser(
+        "validate",
+        help="只做字段/结构校验，不连接 Bridge、不创建 session",
+        formatter_class=_HelpFormatter,
+    )
+    scenario_validate.add_argument("file", metavar="FILE", help="scenario JSON 文件路径")
+
+    scenario_from_recording = scenario_subparsers.add_parser(
+        "from-recording",
+        help="把 record 产出的 actions.jsonl 转成 scenario 草稿（不含断言）",
+        formatter_class=_HelpFormatter,
+    )
+    scenario_from_recording.add_argument("actions_path", metavar="ACTIONS_JSONL", help="actions.jsonl 路径")
+    scenario_from_recording.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        help="写出草稿到指定文件；不给则只在 stdout 的 JSON 里返回 scenario 字段",
+    )
+    scenario_from_recording.add_argument(
+        "--name",
+        metavar="NAME",
+        help="草稿的 scenario name（默认根据 recording-meta.json 的 sessionId 生成）",
+    )
+
     skills = subparsers.add_parser(
         "skills",
         help="安装或更新 agent skill（SKILL.md）",
@@ -488,7 +920,9 @@ def main(argv: list[str] | None = None) -> int:
         print_json(payload)
         return 0 if payload.get("ok", True) else 1
     except (CliError, BridgeClientError, DiscoveryError, ConfigError, ValueError) as exc:
-        payload = {"ok": False, "code": _error_code(exc), "error": str(exc)}
+        # 信封统一：CLI 自身产生的错误也使用 message 字段，与 Bridge 的
+        # {"ok", "code", "message"} 响应结构一致（历史上曾用 "error"，破坏性变更）。
+        payload = {"ok": False, "code": _error_code(exc), "message": str(exc)}
         if isinstance(exc, CliError):
             payload.update(exc.extra)
         print_json(payload, stream=sys.stderr)
@@ -511,6 +945,17 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "summary": cmd_summary,
         "refresh": cmd_refresh,
         "doctor": cmd_doctor,
+        "build": cmd_build,
+        "health": cmd_health,
+        "hierarchy": cmd_hierarchy,
+        "snapshot": cmd_snapshot,
+        "click": cmd_click,
+        "input": cmd_input,
+        "set-value": cmd_set_value,
+        "gameplay": cmd_gameplay,
+        "record": cmd_record,
+        "profile": cmd_profile,
+        "scenario": cmd_scenario,
         "skills": cmd_skills,
     }
     handler = handlers.get(args.command)
@@ -1038,6 +1483,309 @@ def cmd_refresh(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def cmd_hierarchy(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "hierarchy")
+
+    if args.hierarchy_command == "roots":
+        return client.hierarchy_roots()
+
+    if args.hierarchy_command == "tree":
+        return client.hierarchy_tree(
+            path=args.path,
+            scene=args.scene,
+            depth=args.depth,
+            pageSize=args.page_size,
+            cursor=args.cursor,
+        )
+
+    if args.hierarchy_command == "find":
+        return client.hierarchy_find(
+            name=args.name,
+            nameContains=args.nameContains,
+            nameRegex=args.nameRegex,
+            pathGlob=args.pathGlob,
+            component=args.component,
+            interface=args.interface,
+            missingScript=args.missingScript,
+            tag=args.tag,
+            layer=args.layer,
+            under=args.under,
+            scene=args.scene,
+            active=args.active,
+            textContains=args.textContains,
+            where=args.where,
+            sortBy=args.sortBy,
+            order="desc" if args.desc else None,
+            countOnly=args.countOnly,
+            pageSize=args.page_size,
+            cursor=args.cursor,
+        )
+
+    if args.hierarchy_command == "ancestors":
+        return client.hierarchy_ancestors(path=args.path, scene=args.scene, component=args.component)
+
+    if args.hierarchy_command == "inspect":
+        return client.hierarchy_inspect(path=args.path, scene=args.scene)
+
+    raise CliError("not_found", f"unsupported hierarchy command: {args.hierarchy_command}")
+
+
+def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "capture")
+
+    start_response = client.capture_screenshot(
+        reason=args.reason,
+        max_long_edge=args.max_long_edge,
+        target_directory=args.target_directory,
+    )
+    if not start_response.get("ok", False):
+        raise CliError(
+            start_response.get("code", "internal_error"),
+            start_response.get("message", "启动截图 job 失败"),
+        )
+
+    job_id = start_response.get("jobId")
+    try:
+        job = wait_for_job(project_path, job_id, timeout_seconds=args.timeout, initial_info=info)
+    except JobFailed as exc:
+        raise CliError(
+            exc.job.get("errorCode", "capture_failed"),
+            exc.job.get("errorMessage", "截图失败"),
+        ) from exc
+    except JobTimeout as exc:
+        raise CliError("timeout", str(exc)) from exc
+    except JobEditorExited as exc:
+        raise CliError("editor_exited", str(exc)) from exc
+
+    result = job.get("result") or {}
+    return {
+        "ok": True,
+        "code": "ok",
+        "jobId": job_id,
+        "path": result.get("path"),
+        "width": result.get("width"),
+        "height": result.get("height"),
+    }
+
+
+def cmd_click(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "interaction")
+    return client.interaction_click(path=args.path, force=args.force, scene=args.scene)
+
+
+def cmd_input(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "interaction")
+    return client.interaction_input(path=args.path, text=args.text, submit=args.submit, scene=args.scene)
+
+
+def cmd_set_value(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "interaction")
+    value = _parse_value_arg(args.value)
+    return client.interaction_set_value(path=args.path, value=value, component=args.component, scene=args.scene)
+
+
+def cmd_gameplay(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "gameplay")
+
+    if args.gameplay_command == "list":
+        return client.gameplay_list()
+
+    if args.gameplay_command == "invoke":
+        try:
+            parsed_args = json.loads(args.args) if args.args else {}
+        except json.JSONDecodeError as exc:
+            raise CliError("invalid_argument", f"--args 不是合法 JSON：{exc}") from exc
+        if not isinstance(parsed_args, dict):
+            raise CliError("invalid_argument", "--args 必须是 JSON 对象，例如 '{\"amount\": 100}'")
+        return client.gameplay_invoke(args.name, parsed_args)
+
+    raise CliError("not_found", f"unsupported gameplay command: {args.gameplay_command}")
+
+
+def cmd_record(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "recording")
+
+    if args.record_command == "start":
+        target_directory = getattr(args, "target_directory", None)
+        if getattr(args, "latest", False) or getattr(args, "session_path", None):
+            if target_directory:
+                raise CliError(
+                    "invalid_argument", "--target-directory 与 --session-path/--latest 三选一"
+                )
+            session_path = resolve_session_path(args, project_path)
+            target_directory = str(session_path / "artifacts")
+        return client.recording_start(target_directory=target_directory)
+
+    if args.record_command == "stop":
+        return client.recording_stop()
+
+    if args.record_command == "status":
+        return client.recording_status()
+
+    raise CliError("not_found", f"unsupported record command: {args.record_command}")
+
+
+def cmd_profile(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    _require_capability(client, "profiling")
+
+    if args.profile_command == "start":
+        target_directory = getattr(args, "target_directory", None)
+        if getattr(args, "latest", False) or getattr(args, "session_path", None):
+            if target_directory:
+                raise CliError(
+                    "invalid_argument", "--target-directory 与 --session-path/--latest 三选一"
+                )
+            session_path = resolve_session_path(args, project_path)
+            target_directory = str(session_path / "artifacts")
+        return client.profiling_start(target_directory=target_directory)
+
+    if args.profile_command == "stop":
+        return client.profiling_stop()
+
+    if args.profile_command == "status":
+        return client.profiling_status()
+
+    raise CliError("not_found", f"unsupported profile command: {args.profile_command}")
+
+
+def cmd_scenario(args: argparse.Namespace) -> dict[str, Any]:
+    if args.scenario_command == "validate":
+        scenario_data = load_scenario(args.file)
+        errors = validate_scenario(scenario_data)
+        return {"ok": not errors, "code": "ok" if not errors else "invalid_scenario", "errors": errors}
+
+    if args.scenario_command == "from-recording":
+        try:
+            scenario_data = convert_recording_to_scenario(args.actions_path, name=args.name)
+        except ScenarioValidationError as exc:
+            raise CliError("invalid_scenario", str(exc), extra={"errors": exc.errors}) from exc
+        payload: dict[str, Any] = {"ok": True, "code": "ok", "scenario": scenario_data}
+        if args.output:
+            output_path = Path(args.output).expanduser().resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(scenario_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            payload["outputPath"] = str(output_path)
+        return payload
+
+    if args.scenario_command == "run":
+        return _cmd_scenario_run(args)
+
+    raise CliError("not_found", f"unsupported scenario command: {args.scenario_command}")
+
+
+def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
+    effective = resolve_effective_config(project_path=args.project_path)
+    scenario_data = load_scenario(args.file)
+    errors = validate_scenario(scenario_data)
+    if errors:
+        raise CliError("invalid_scenario", "; ".join(errors), extra={"errors": errors})
+
+    info = discover(effective.project_path)
+    client = BridgeClient(info.base_url, info.token)
+
+    session_name = args.session_name or scenario_data.get("name") or "scenario"
+    session = create_session(
+        project_path=effective.project_path,
+        name=session_name,
+        scene_path=None,
+        trigger="scenario",
+        task=scenario_data.get("description", ""),
+        created_at=utc_now(),
+        editor_pid=info.pid,
+        unity_version=info.unity_version,
+    )
+    client.start_session(session.session_id, str(session.session_path))
+    update_session_status(session.session_path, "running", started_at=format_time(utc_now()))
+
+    ctx = ScenarioContext(
+        client=client,
+        session_path=session.session_path,
+        capture_config=_load_capture_config(effective.project_path),
+        timeout_scale=args.timeout_scale,
+        screenshot_target_directory=str(session.session_path / "artifacts"),
+    )
+
+    try:
+        result = run_scenario(scenario_data, ctx)
+    except ScenarioValidationError as exc:
+        _abort_bridge_session(client)
+        _finalize_failed_session(session.session_path, effective.project_path, "invalid_scenario")
+        raise CliError("invalid_scenario", "; ".join(exc.errors)) from exc
+    except Exception as exc:  # noqa: BLE001 - 任何未预期异常都要保证 session 收尾落盘，而不是留下悬空 session
+        _abort_bridge_session(client)
+        _finalize_failed_session(session.session_path, effective.project_path, "scenario_execution_error")
+        raise CliError("scenario_execution_error", str(exc)) from exc
+
+    end_response = client.end_session()
+    update_session_status(session.session_path, "stopped", ended_at=format_time(utc_now()))
+
+    artifacts_dir = session.session_path / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "scenario-result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+    summary_payload = build_summary(
+        session.session_path, load_log_rules(effective.project_path), scenario_result=result
+    )
+    write_summary(session.session_path, summary_payload)
+
+    return {
+        "ok": result["status"] == "passed",
+        "code": "ok" if result["status"] == "passed" else "scenario_failed",
+        "sessionId": session.session_id,
+        "sessionPath": str(session.session_path),
+        "sessionEnd": end_response,
+        "scenario": result,
+        "summary": summary_payload,
+    }
+
+
+def _load_capture_config(project_path: Path) -> dict[str, Any]:
+    config_path = Path(project_path) / ".unity-agent" / "config.json"
+    payload = read_json(config_path)
+    screenshot_config = ((payload.get("capture") or {}).get("screenshot") or {})
+    return {
+        "onAssertFailure": screenshot_config.get("onAssertFailure", True),
+        "onScenarioStep": screenshot_config.get("onScenarioStep", True),
+    }
+
+
+def _parse_value_arg(raw: str) -> Any:
+    """--value 优先按 JSON 解析（覆盖数字/布尔/对象/数组等 set-value 支持的形态）；
+    不是合法 JSON 时退化为裸字符串透传给 Bridge，由 Bridge 侧按组件类型校验报错。"""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
 def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
@@ -1118,6 +1866,63 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
 
 
+def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
+    effective = resolve_effective_config(project_path=args.project_path)
+    timeout_seconds = (
+        args.timeout if args.timeout is not None else effective.timeouts.build_seconds
+    )
+
+    try:
+        result = run_build(
+            project_path=effective.project_path,
+            unity_executable=effective.unity_executable_path,
+            target=args.target,
+            output_path=args.output_path,
+            timeout_seconds=timeout_seconds,
+        )
+    except BuildError as exc:
+        raise CliError(exc.code, str(exc)) from exc
+
+    report = result.report
+    return {
+        "ok": result.ok,
+        "code": "ok" if result.ok else "build_failed",
+        "buildId": result.build_id,
+        "result": result.result,
+        "reportPath": str(result.report_path),
+        "logPath": str(result.log_path),
+        "outputPath": report.get("outputPath") or str(result.output_path),
+        "sizeBytes": report.get("sizeBytes"),
+        "durationMs": report.get("durationMs"),
+        "errors": report.get("errors", []),
+        "warnings": report.get("warnings", []),
+        "reportSource": report.get("reportSource"),
+    }
+
+
+def cmd_health(args: argparse.Namespace) -> dict[str, Any]:
+    effective = resolve_effective_config(project_path=args.project_path)
+    timeout_seconds = args.timeout if args.timeout is not None else effective.timeouts.play_seconds
+    checks = [name.strip() for name in args.check.split(",")] if args.check else None
+
+    try:
+        result = run_health(
+            project_path=effective.project_path,
+            effective=effective,
+            checks=checks,
+            timeout_seconds=timeout_seconds,
+        )
+    except HealthError as exc:
+        raise CliError(exc.code, str(exc)) from exc
+
+    return {
+        "ok": result["ok"],
+        "code": "ok" if result["ok"] else "health_check_failed",
+        "status": result["status"],
+        "checks": result["checks"],
+    }
+
+
 def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
     # 绝对路径 --target 不依赖项目根目录，找不到项目也允许安装
     project_path: Path | None = None
@@ -1147,6 +1952,18 @@ def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
     if result.action == "already_installed":
         payload["hint"] = "skill 已存在且未被覆盖；如需刷新请运行 unityctl skills update"
     return payload
+
+
+def _require_capability(client: BridgeClient, capability: str) -> None:
+    """新命令（hierarchy/capture/interaction/gameplay/recording/profiling 等）执行前
+    调用，缺失能力时给出明确的降级提示，而不是让请求以 404/not_found 失败。"""
+    capabilities_response = client.get_capabilities()
+    capabilities = capabilities_response.get("capabilities", [])
+    if capability not in capabilities:
+        raise CliError(
+            "bridge_capability_missing",
+            f"bridge 版本过旧，缺少 {capability} 能力，请升级 UPM 包",
+        )
 
 
 def _refresh_client(

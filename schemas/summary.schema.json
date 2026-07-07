@@ -98,6 +98,69 @@
     "failedReason": {
       "type": ["string", "null"],
       "description": "当 session.json 的 status 为 failed（进程级失败，如编译失败/超时/Editor 退出）时的原因。"
+    },
+    "scenario": {
+      "description": "仅当该 session 由 `unityctl scenario run` 产生时存在；断言失败视为 blocking，与 Exception 同级。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "stepsTotal", "stepsPassed", "stepsFailed", "assertions"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "stepsTotal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stepsPassed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stepsFailed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status", "expected", "actual", "evidence"],
+            "properties": {
+              "id": { "type": "string" },
+              "status": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+              "expected": {},
+              "actual": {},
+              "evidence": { "type": ["object", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "description": "仅当该 session 的 artifacts/metrics.jsonl 存在（即执行过 profile-start/profile-stop）时存在；按指标名聚合 avg/max/p95。绝对值含 Editor 开销，不代表真机性能，只用于同机同项目改动前后的相对回归比较。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameCount", "metrics"],
+      "properties": {
+        "frameCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["avg", "max", "p95"],
+            "properties": {
+              "avg": { "type": "number" },
+              "max": { "type": "number" },
+              "p95": { "type": "number" }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

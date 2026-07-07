@@ -10,12 +10,13 @@ lerna-debug.log*
 node_modules/
 jspm_packages/
 
-# Build output
-dist/
-build/
-out/
-target/
-coverage/
+# Build output (anchored to repo root: avoid matching nested source dirs
+# like packages/*/Editor/Build/ or Tests/Editor/Build/)
+/dist/
+/build/
+/out/
+/target/
+/coverage/
 *.egg-info/
 
 # System files

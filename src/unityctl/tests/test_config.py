@@ -105,6 +105,8 @@ def test_init_project_config_updates_gitignore_for_all_local_artifacts(tmp_path)
     assert ".unity-agent/config.local.json" in ignored
     assert ".unity-agent/sessions/" in ignored
     assert ".unity-agent/bridge.json" in ignored
+    assert ".unity-agent/scratch/" in ignored
+    assert ".unity-agent/builds/" in ignored
 
 
 def test_append_gitignore_entry_adds_missing_line_once(tmp_path):

@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
@@ -49,8 +50,122 @@ class BridgeClient:
     def refresh(self) -> dict[str, Any]:
         return self.post("refresh")
 
-    def get(self, path: str) -> dict[str, Any]:
-        url = self._url(path)
+    def get_capabilities(self) -> dict[str, Any]:
+        """老版本 Bridge 没有 /capabilities 路由，返回 not_found；这里统一降级为
+        只有 core 能力的信封，供调用方做兼容判断而不必特判 404。"""
+        try:
+            return self.get("capabilities")
+        except BridgeClientError as exc:
+            if exc.code == "not_found":
+                return {"ok": True, "bridgeVersion": None, "capabilities": ["core"], "legacy": True}
+            raise
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        return self.get(f"jobs/{job_id}")
+
+    def hierarchy_roots(self) -> dict[str, Any]:
+        return self.get("hierarchy/roots")
+
+    def hierarchy_tree(self, **params: Any) -> dict[str, Any]:
+        return self.get("hierarchy/tree", params)
+
+    def hierarchy_find(self, **params: Any) -> dict[str, Any]:
+        return self.get("hierarchy/find", params)
+
+    def hierarchy_ancestors(self, **params: Any) -> dict[str, Any]:
+        return self.get("hierarchy/ancestors", params)
+
+    def hierarchy_inspect(self, **params: Any) -> dict[str, Any]:
+        return self.get("hierarchy/inspect", params)
+
+    def interaction_click(
+        self,
+        path: str,
+        force: bool = False,
+        scene: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"path": path, "force": force}
+        if scene is not None:
+            payload["scene"] = scene
+        return self.post("interaction/click", payload)
+
+    def interaction_input(
+        self,
+        path: str,
+        text: str,
+        submit: bool = False,
+        scene: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"path": path, "text": text, "submit": submit}
+        if scene is not None:
+            payload["scene"] = scene
+        return self.post("interaction/input", payload)
+
+    def interaction_set_value(
+        self,
+        path: str,
+        value: Any,
+        component: str | None = None,
+        scene: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"path": path, "value": value}
+        if component is not None:
+            payload["component"] = component
+        if scene is not None:
+            payload["scene"] = scene
+        return self.post("interaction/set-value", payload)
+
+    def recording_start(self, target_directory: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if target_directory is not None:
+            payload["targetDirectory"] = target_directory
+        return self.post("recording/start", payload)
+
+    def recording_stop(self) -> dict[str, Any]:
+        return self.post("recording/stop")
+
+    def recording_status(self) -> dict[str, Any]:
+        return self.get("recording/status")
+
+    def profiling_start(self, target_directory: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if target_directory is not None:
+            payload["targetDirectory"] = target_directory
+        return self.post("profiling/start", payload)
+
+    def profiling_stop(self) -> dict[str, Any]:
+        return self.post("profiling/stop")
+
+    def profiling_status(self) -> dict[str, Any]:
+        return self.get("profiling/status")
+
+    def health_scan_prefabs(self) -> dict[str, Any]:
+        return self.post("health/scan-prefabs")
+
+    def gameplay_list(self) -> dict[str, Any]:
+        return self.get("gameplay/commands")
+
+    def gameplay_invoke(self, command: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"command": command, "args": args or {}}
+        return self.post("gameplay/invoke", payload)
+
+    def capture_screenshot(
+        self,
+        reason: str | None = None,
+        max_long_edge: int | None = None,
+        target_directory: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if reason is not None:
+            payload["reason"] = reason
+        if max_long_edge is not None:
+            payload["maxLongEdge"] = max_long_edge
+        if target_directory is not None:
+            payload["targetDirectory"] = target_directory
+        return self.post("capture/screenshot", payload)
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        url = self._url(path, params)
         request = Request(url, method="GET", headers=self._headers())
         return self._send(request)
 
@@ -65,8 +180,22 @@ class BridgeClient:
     def _headers(self) -> dict[str, str]:
         return {"X-Bridge-Token": self.token}
 
-    def _url(self, path: str) -> str:
-        return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
+    def _url(self, path: str, params: dict[str, Any] | None = None) -> str:
+        url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
+        if not params:
+            return url
+        # None/False 值一律省略（而不是序列化成 "None"/"False" 字符串），
+        # 让调用方可以直接把整个 kwargs 字典透传过来而不用逐个判空。
+        # bool True 显式转成小写 "true"——Bridge 的 GetQueryBool 只认小写字面量，
+        # 而 urlencode 对 Python bool 会用 str() 产出首字母大写的 "True"。
+        cleaned = {
+            key: ("true" if value is True else value)
+            for key, value in params.items()
+            if value is not None and value is not False
+        }
+        if not cleaned:
+            return url
+        return f"{url}?{urlencode(cleaned)}"
 
     def _send(self, request: Request) -> dict[str, Any]:
         try:

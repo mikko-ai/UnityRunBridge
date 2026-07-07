@@ -1,10 +1,25 @@
 using System;
 using UnityEditor.SceneManagement;
+using Mk.UnityAgentBridge.Editor.Routing;
 
 namespace Mk.UnityAgentBridge.Editor
 {
     internal static class SceneController
     {
+        public static void RegisterRoutes()
+        {
+            RouteTable.Register("POST", "open-scene", ctx =>
+            {
+                OpenSceneRequest sceneRequest = BridgeServer.ParseJsonOrNull<OpenSceneRequest>(ctx.RawBody);
+                if (sceneRequest == null)
+                {
+                    return BridgeResponse.Failure("invalid_request", "invalid open-scene request body");
+                }
+
+                return OpenScene(sceneRequest.scenePath);
+            });
+        }
+
         public static BridgeResponse OpenScene(string scenePath)
         {
             if (!IsValidProjectScenePath(scenePath))
