@@ -281,6 +281,99 @@ def test_play_no_wait_still_opens_requested_scene(monkeypatch, tmp_path, capsys)
     ]
 
 
+def test_play_without_scene_uses_default_scene_from_config(monkeypatch, tmp_path, capsys):
+    from unityctl.config import init_project_config
+
+    project = make_unity_project(tmp_path / "Game")
+    init_project_config(
+        project_path=project,
+        default_scene="Assets/Scenes/Main.unity",
+    )
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(["--project", str(project), "play", "--no-wait"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert clients[0].calls == [
+        ("status", None),
+        ("open-scene", {"scenePath": "Assets/Scenes/Main.unity"}),
+        ("play", None),
+    ]
+
+
+def test_play_explicit_scene_overrides_default_scene(monkeypatch, tmp_path, capsys):
+    from unityctl.config import init_project_config
+
+    project = make_unity_project(tmp_path / "Game")
+    init_project_config(
+        project_path=project,
+        default_scene="Assets/Scenes/Main.unity",
+    )
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(project),
+            "play",
+            "--scene",
+            "Assets/Scenes/Login.unity",
+            "--no-wait",
+        ]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert clients[0].calls == [
+        ("status", None),
+        ("open-scene", {"scenePath": "Assets/Scenes/Login.unity"}),
+        ("play", None),
+    ]
+
+
+def test_play_with_session_records_resolved_default_scene(monkeypatch, tmp_path, capsys):
+    from datetime import datetime
+
+    from unityctl.config import init_project_config
+
+    project = make_unity_project(tmp_path / "Game")
+    init_project_config(
+        project_path=project,
+        default_scene="Assets/Scenes/Main.unity",
+    )
+    monkeypatch.setattr(
+        cli, "utc_now", lambda: datetime.fromisoformat("2026-06-30T18:30:12+00:00")
+    )
+    patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(project),
+            "play",
+            "--session",
+            "main-flow",
+            "--no-wait",
+        ]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    session_json = json.loads(
+        (
+            project
+            / ".unity-agent"
+            / "sessions"
+            / output["sessionId"]
+            / "session.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert session_json["scenePath"] == "Assets/Scenes/Main.unity"
+
+
 def test_play_no_wait_with_session_marks_session_running(monkeypatch, tmp_path, capsys):
     from datetime import datetime
 

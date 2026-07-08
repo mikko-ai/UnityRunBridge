@@ -255,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="进入 Play Mode",
         description=(
             "可选打开场景并创建 session 记录运行日志。"
+            "未指定 --scene 时使用 config.json 中的 defaultScene；若也未配置则播放当前场景。"
             "默认等待进入 Play Mode；若存在编译错误则失败。"
         ),
         formatter_class=_HelpFormatter,
@@ -270,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scene",
         dest="scene_path",
         metavar="PATH",
-        help="进入 Play Mode 前打开的场景路径",
+        help="进入 Play Mode 前打开的场景路径（覆盖 config.json 中的 defaultScene）",
     )
     play.add_argument("--task", default="", help="session 任务描述（写入 session.json）")
     play.add_argument(
@@ -1122,6 +1123,7 @@ def cmd_open_scene(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_play(args: argparse.Namespace) -> dict[str, Any]:
     effective = resolve_effective_config(project_path=args.project_path)
+    scene_path = args.scene_path or effective.default_scene
     timeout_seconds = (
         args.timeout if args.timeout is not None else effective.timeouts.play_seconds
     )
@@ -1159,7 +1161,7 @@ def cmd_play(args: argparse.Namespace) -> dict[str, Any]:
         session = create_session(
             project_path=effective.project_path,
             name=args.session_name,
-            scene_path=args.scene_path,
+            scene_path=scene_path,
             trigger=args.trigger,
             task=args.task,
             created_at=utc_now(),
@@ -1169,8 +1171,8 @@ def cmd_play(args: argparse.Namespace) -> dict[str, Any]:
         client.start_session(session.session_id, str(session.session_path))
 
     try:
-        if args.scene_path:
-            open_scene_response = client.post("open-scene", {"scenePath": args.scene_path})
+        if scene_path:
+            open_scene_response = client.post("open-scene", {"scenePath": scene_path})
             if not open_scene_response.get("ok", False):
                 raise CliError(
                     open_scene_response.get("code", "invalid_request"),
@@ -1179,7 +1181,7 @@ def cmd_play(args: argparse.Namespace) -> dict[str, Any]:
             if not args.no_wait:
                 scene_result = poll_until(
                     effective.project_path,
-                    predicate=lambda current: current.get("activeScenePath") == args.scene_path,
+                    predicate=lambda current: current.get("activeScenePath") == scene_path,
                     timeout_seconds=timeout_seconds,
                     initial_info=info,
                 )

@@ -25,6 +25,8 @@ unityctl stop --latest
 
 `play` 成功后输出包含 `sessionId` 和 `sessionPath`，后续命令可用 `--latest` 或 `--session-path <路径>` 引用该 session。`stop --latest` 的输出已带 `summary` 字段；如需事后重新读取，再运行 `unityctl summary --latest`。
 
+- `play` 未指定 `--scene` 时，使用 `config.json` 的 `defaultScene`（`unityctl init --scene <路径>` 可写入）；若也未配置，则播放 Editor 当前已打开的场景。`--scene` 优先于 `defaultScene`。
+
 判读规则：
 
 - `refresh` 返回的 `compilationSucceeded` 为 `false` 时，`compilationErrors` 数组包含文件、行号和错误信息，先修复编译错误再继续。
