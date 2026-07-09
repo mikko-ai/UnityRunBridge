@@ -125,7 +125,7 @@ uv run unityctl --help
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
 | `health` | 项目健康检查（编译/缺失脚本/构建场景/包一致性） |
-| `skills init` / `skills update` | 安装 / 更新 agent skill（SKILL.md） |
+| `skills init` / `skills update` | 安装 / 更新内置 agent skills（unityctl 参考手册 + project skill creator） |
 
 查看完整参数说明：
 
@@ -358,11 +358,11 @@ unityctl health --check compilation,missing_scripts        # 只跑指定项
 
 四项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
 
-以上各命令的完整参数、错误码和判读规则见内置的 [`unityctl` agent skill](src/unityctl/unityctl/skill_assets/SKILL.md)（`unityctl skills init` 后也会安装到你的 Unity 项目里）。
+以上各命令的完整参数、错误码和判读规则见内置的 [`unityctl` agent skill](src/unityctl/unityctl/skill_assets/unityctl/SKILL.md)（`unityctl skills init` 后也会安装到你的 Unity 项目里）。
 
 ## Agent Skill
 
-CLI 内置了一份 `unityctl` 的 agent skill（SKILL.md），用自然语言描述"改代码 → refresh → play → summary"的标准 Unity 验证流程，供 Cursor、Claude Code 等 coding agent 学习使用。
+CLI 内置了两份 agent skill（目录形态）：`unityctl`（参考手册，描述"改代码 → refresh → play → summary"的标准 Unity 验证流程）与 `unityctl-project-skill-creator`（引导为项目生成自定义 skill），供 Cursor、Claude Code 等 coding agent 学习使用。
 
 在 Unity 项目根目录（或其子目录）安装：
 
@@ -370,7 +370,7 @@ CLI 内置了一份 `unityctl` 的 agent skill（SKILL.md），用自然语言�
 unityctl skills init
 ```
 
-默认安装到 Unity 项目的 `.agents/skills/unityctl/SKILL.md`。可以用 `--target` 指定其他 skills 根目录，相对路径基于项目根目录解析，也支持绝对路径：
+默认安装到 Unity 项目的 `.agents/skills/` 下（每个 skill 一个目录）。可以用 `--target` 指定其他 skills 根目录，相对路径基于项目根目录解析，也支持绝对路径：
 
 ```bash
 unityctl skills init --target .cursor/skills          # 安装到项目的 .cursor/skills/
@@ -379,10 +379,20 @@ unityctl skills init --target ~/.claude/skills        # 安装到全局目录（
 
 行为语义与 `init` / schema 一致：
 
-- `skills init`：已存在时不覆盖，返回 `already_installed`。
-- `skills update`：总是刷新为当前 CLI 版本内置内容（未安装则直接安装）；升级 CLI 后运行一次即可同步 skill。
+- `skills init`：目录已存在时不覆盖，返回 `already_installed`。
+- `skills update`：与内置内容有差异时整目录覆盖刷新（未安装则直接安装，无差异返回 `up_to_date`）；升级 CLI 后运行一次即可同步 skill。
 
 skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的 CLI 版本。
+
+## 为你的项目编写自定义 skill
+
+官方 `unityctl` skill 是通用参考手册，由 `unityctl skills update` 整目录覆盖刷新，**不要直接修改它**。项目专属的知识与流程放在你自己的 skill 里：
+
+1. 在 `.agents/skills/<名字>/SKILL.md` 新建自己的 skill（`skills update` 永不触碰官方分发清单之外的目录）。
+2. 自定义 skill 里写项目知识（界面约定、专属验证流程），组合调用 unityctl 命令即可；不要复述命令用法，用法以官方 skill 为准，避免两处过时。
+3. 现成的数据扩展点：`scenario` JSON（可复跑验证脚本）、`.unity-agent/log-rules.json`（ignore 降噪 / watch 聚焦）、`gameplay` 的 attribute / whitelist（游戏侧暴露命令）。
+4. 只想手动触发的流程，在 frontmatter 加 `disable-model-invocation: true`。
+5. UI 定位类知识（界面根节点、识别规则、置顶判断）推荐用 `unityctl-project-skill-creator` 引导生成：对 agent 说「用 unityctl-project-skill-creator 为这个项目生成 UI 定位 skill」。
 
 ## 数据契约与示例
 

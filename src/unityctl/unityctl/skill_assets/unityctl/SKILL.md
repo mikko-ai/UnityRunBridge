@@ -65,6 +65,8 @@ unityctl config validate    # 确认配置无误后再 start
 | 可复跑验证脚本 | `scenario` | `references/scenario.md` |
 | 性能采样 / Player 构建 / 健康检查 | `profile` / `build` / `health` | `references/profiling-build-health.md` |
 
+项目专属知识（界面约定等）不在本 skill 中：查看项目 `.agents/skills/` 下的其他 skill；如何编写见仓库 README「为你的项目编写自定义 skill」一节。
+
 ## 高频错误码
 
 完整错误码表见 `references/error-codes.md`，以下是最常见的 5 个：
