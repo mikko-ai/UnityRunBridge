@@ -2,7 +2,7 @@ namespace Mk.UnityAgentBridge.Editor
 {
     internal static class BridgeConfig
     {
-        public const string Version = "0.1.2";
+        public const string Version = "0.2.0";
 
         /// <summary>
         /// 监听地址硬编码为 127.0.0.1，不开放为配置项：暴露到局域网需要完整的安全设计，
