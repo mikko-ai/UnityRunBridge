@@ -5,7 +5,7 @@
 
 ## 一、背景与问题
 
-unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.md`，约 340 行），由 `unityctl skills init/update` 安装到项目的 `.agents/skills/unityctl/`。随着垂直能力（Phase 0-4）全部并入，出现三个问题：
+unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.md`，约 350 行），由 `unityctl skills init/update` 安装到项目的 `.agents/skills/unityctl/SKILL.md`（单文件）。随着垂直能力（Phase 0-4）全部并入，出现三个问题：
 
 1. **官方 skill 单文件持续膨胀**。触发后整份进入 agent 上下文，且随 scenario v2、MCP 等后续能力还会继续增长。
 2. **通用工具与项目知识之间存在鸿沟**。`unityctl hierarchy` 能回答"路径 X 下有什么"，但回答不了"这个游戏里什么算一个界面"。后者是项目知识：命名约定（界面以 `Panel` 结尾）、标记组件（都挂某个 UI 基类）、根结构、置顶机制。没有这份知识，agent 每次任务都要盲探（逐层 `tree` 展开），慢且可能归纳错；这份知识又不能写进官方 skill——一写就变成错误的通用知识。
@@ -21,11 +21,13 @@ unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.m
   unityctl/                          # 官方参考手册（主动调用）
     SKILL.md                         # 精简主文件：核心工作流 + 能力索引
     references/                      # 按需加载的深度参考
-      hierarchy.md
-      interaction.md                 # click/input/set-value/record
-      scenario.md
-      profiling-build-health.md
-      error-codes.md
+      hierarchy.md                   # hierarchy 查询详解与消歧规则
+      interaction.md                 # click/input/set-value、snapshot 截图、record 录制
+      gameplay.md                    # gameplay 命令桥（发现通道、配置、审计）
+      logs.md                        # 日志查询过滤、log-rules（ignore/watch）
+      scenario.md                    # scenario 文件结构与断言模型
+      profiling-build-health.md      # profile / build / health
+      error-codes.md                 # 完整错误码表
   unityctl-project-skill-creator/    # creator（被动调用）
     SKILL.md                         # 路由 + 共享原则
     flows/
@@ -43,21 +45,62 @@ unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.m
 
 **也不维持单文件**：改为渐进式披露——
 
-- `SKILL.md` 收缩到百行以内：frontmatter、「改完代码后验证」主链路（refresh → play → stop → summary 判读）、环境准备、能力索引表（每个能力 2-3 行 + 指向 `references/` 对应文件）。
-- `references/` 承载深度内容：hierarchy 子命令详解与消歧规则、UI 操作与录制、scenario 文件结构与断言模型、profiling/build/health、完整错误码表。agent 需要时才读对应文件。
+- `SKILL.md` 收缩到百行以内：frontmatter、「改完代码后验证」主链路（refresh → play → stop → summary 判读）、环境准备、注意事项、能力索引表（每个能力 2-3 行 + 指向 `references/` 对应文件）。
+- `references/` 承载深度内容，agent 需要时才读对应文件。每个 reference 文件首段说明适用场景。
+- frontmatter 的 `description` 只写验证主链路的触发条件，不罗列全部子能力（避免触发面过宽导致整份加载）；主文件索引表中明确要求"执行下列能力前必须先读对应 reference 文件"。
 - 版本号仍写在主文件 frontmatter 的 `x-unityctl-version` 字段。
+
+现有章节 → 目标文件的完整映射（不允许静默删减内容）：
+
+| 现有 SKILL.md 章节 | 目标位置 |
+|---|---|
+| frontmatter、核心工作流、环境准备、注意事项 | 主 `SKILL.md` |
+| 日志与排错、log-rules（ignore/watch） | `references/logs.md` |
+| 查询场景 Hierarchy | `references/hierarchy.md` |
+| 截图（snapshot）、UI 操作、录制（record） | `references/interaction.md` |
+| Gameplay 命令 | `references/gameplay.md` |
+| Scenario | `references/scenario.md` |
+| 性能采样、构建、项目健康检查 | `references/profiling-build-health.md` |
+| 常见错误码表 | `references/error-codes.md`（主文件保留最高频的 5 个左右 + 指引） |
 
 ## 四、`skills.py` 分发改造
 
-从"分发单文件"改为"分发目录"，语义保持不变：
+从"分发单文件"改为"分发目录"。源码树布局：`skill_assets/<skill 名>/`，每个 skill 一个子目录（`skill_assets/unityctl/SKILL.md` + `references/`、`skill_assets/unityctl-project-skill-creator/SKILL.md` + `flows/`）。
 
-- `skills init`：目标 skill 目录已存在则保持原样（`already_installed`），否则整目录写入。
-- `skills update`：内容有差异则**整目录覆盖刷新**（先删后写，避免残留已删除的旧文件），无差异返回 `up_to_date`。
-- 官方分发物为两个 skill 目录：`unityctl` 与 `unityctl-project-skill-creator`，一次 init/update 同时处理两者。
-- 版本占位符 `__UNITYCTL_VERSION__` 机制保留，仅作用于各 skill 的主 `SKILL.md`。
+### 安装语义
+
+- 官方分发清单固定为两个 skill 目录：`unityctl` 与 `unityctl-project-skill-creator`，一次 `init`/`update` 依次处理两者，互不影响（无原子回滚；单个失败不阻止另一个）。
+- `skills init`：目标 skill 目录已存在（含旧版单文件形态，即目录下只有 `SKILL.md`）则保持原样返回 `already_installed`，并附 `hint` 提示可运行 `skills update` 升级为目录结构；不存在则整目录写入。
+- `skills update`：渲染后的内置目录树与目标目录树逐文件比较（文件集合 + 内容全等，忽略 mtime），有差异则**先删除整个目标 skill 目录再整树写入**（自然覆盖旧单文件安装、清除已删除的旧文件），无差异返回 `up_to_date`。
+- 版本占位符 `__UNITYCTL_VERSION__` 与 `x-unityctl-version` 字段：两个 skill 的主 `SKILL.md` 都必须包含，渲染与版本读取逻辑对两者一致；`references/`、`flows/` 文件不含占位符，按原文分发。
 - 用户自建的 skill 目录（不在分发清单内）永不触碰。
 
-需同步更新 `tests/test_skills.py`：目录安装、整目录覆盖、用户目录不受影响、版本渲染。
+### CLI 响应契约（破坏性变更，可接受）
+
+`cmd_skills` 返回从单对象改为聚合结构：
+
+```json
+{
+  "ok": true,
+  "code": "installed",
+  "version": "0.2.0",
+  "skills": [
+    { "name": "unityctl", "action": "installed", "skillPath": "...", "previousVersion": null },
+    { "name": "unityctl-project-skill-creator", "action": "installed", "skillPath": "..." }
+  ]
+}
+```
+
+- 顶层 `code` 聚合规则：任一 skill 失败为错误（`ok: false`，退出码 1）；否则取"变更程度最高"的 action（`installed`/`updated` > `already_installed`/`up_to_date`）。
+- `already_installed` 时保留现有 `hint` 行为。
+
+### 打包
+
+`pyproject.toml` 的 `package-data` 从 `skill_assets/*.md` 改为递归 glob（`skill_assets/**/*.md`），确保 `references/`、`flows/` 子目录进入分发包。
+
+### 测试（`tests/test_skills.py` 同步更新）
+
+目录安装、update 整目录覆盖并清除残留文件、旧单文件安装经 update 升级为目录、用户自建目录不受影响、两个官方 skill 同时分发、版本渲染与读取、聚合响应 code 规则、安装后文件齐全（打包 glob 生效）。
 
 ## 五、Project Skill Creator 设计
 
@@ -79,7 +122,7 @@ creator 不是程序，是一份给 agent 看的操作剧本：什么阶段探�
 
 1. **约定优先于路径**。产出以规则层（架构级约定）为主体，规则腐烂慢、压缩率高、能直接翻译成查询；不生成大而全的路径快照。
 2. **验证优先于生成**。每条候选规则写入前必须机械验证：翻译成 `unityctl hierarchy find` 查询当场跑一遍，结果与预期比对，通过才写入，且验证过的查询本身作为示例写进生成物。
-3. **诚实原则**。例外如实记录；覆盖率不足的规则标注"部分适用"及范围；完全无规律时诚实输出"该项目无统一约定"并降级为探测指引——这是合法产物，不算失败。禁止写入未经验证的规则。用户口述、无法机械验证的信息可以写入，但必须标注来源（`用户口述，未验证`）。
+3. **诚实原则**。例外如实记录；覆盖率不足的规则标注"部分适用"及范围；完全无规律时诚实输出"该项目无统一约定"并降级为探测指引——这是合法产物，不算失败。禁止把未经验证的规则标注为已验证。用户口述、无法机械验证的信息可以写入，但必须标注来源（`用户口述，未验证`）。
 4. **生成物克制**。只写项目知识，不复述任何 unityctl 用法（用法在官方 skill 里，两处写必然两处过时）；物理形态为单份 markdown，不做独立知识库系统。
 5. **内置自愈**。生成物末尾固定一节自愈指引：查询失效（`node_not_found` 等）时先用规则层重新探测，定位成功后提示用户更新本文件。知识过时的代价是"多一轮查询"，不是"任务失败"。
 
@@ -94,14 +137,20 @@ creator 不是程序，是一份给 agent 看的操作剧本：什么阶段探�
 执行流程五阶段：
 
 ```text
-A 环境检查   doctor → start → status；Editor 不可用则整体降级为纯问答模式
+A 环境检查   doctor → start → status；Editor 不可用则降级为纯问答模式（见下）
 B 探测       play → hierarchy roots → 有限深度 tree → 常见 UI 组件/命名采样
-             → 少量 inspect 抽查组件构成（采样深度与节点数写死上限，避免大项目扫穿）
+             → 少量 inspect 抽查组件构成
 C 归纳       候选规则限四类：命名后缀规律 / 公共标记组件 / UI 根结构 / 置顶机制
 D 验证补全   每条候选规则 → find 查询验证；置顶机制的验证：请用户依次打开两个界面，
              跑置顶查询比对实际情况；访谈 ≤ 5 个问题（典型 2-3 个）
 E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 ```
+
+探测上限初值（写进 flow，实施时可按验收反馈调整）：`tree` 展开深度 ≤ 3；`inspect` 抽查节点 ≤ 10；`find` 采样分页不翻页（首页 50 条）；`roots` 全量。标准访谈问题（≤ 5，从中选用）：① 确认探测出的 UI 根节点是否完整；② 请打开 1-2 个当前不在场景中的界面抽查识别规则；③ 依次打开两个界面验证置顶机制；④ 确认例外（不符合规则的已知界面）；⑤ 确认生成物 skill 的名称。
+
+**纯问答降级模式**（Editor 不可用时）：跳过 B/D 的探测与验证，全部规则来自用户口述并一律标注 `用户口述，未验证`；生成物结构不变，并在开头声明"本文件生成时未经探测验证，建议 Editor 可用时重跑 creator 校验"。这是合法产物，不违反验证硬门槛——硬门槛的准确表述是"**禁止把未验证的规则标成已验证**"，而不是"没有验证就不能生成"。
+
+生成物命名：`<游戏名>` 默认取 Unity `PlayerSettings` 的 Product Name（`ProjectSettings/ProjectSettings.asset` 的 `productName`，探测不到时问用户），转小写、空格与非法字符转 `-`；目标目录已存在时询问覆盖或改名。
 
 置顶机制的常见形态（flow 中给 agent 的判别提示）：同一 Canvas 下以 sibling 顺序决定；每界面独立 Canvas 以 `sortingOrder` 决定（查询：`hierarchy find --component Canvas --sort-by Canvas.sortingOrder --desc --page-size 1`）；UIManager 内部栈管理（hierarchy 看不出来，诚实写明"以 sibling 顺序近似"或"需 gameplay 命令查询"）。
 
@@ -114,18 +163,18 @@ E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 5. **例外清单**：不符合规则的部分。
 6. **自愈指引**：规则失效时的标准重探测动作。
 
-再次触发 creator 且生成物已存在时，先询问"全量重建还是只更新部分内容"，做增量访谈。
+再次触发 creator 且生成物已存在时，v1 只支持**全量重建**（确认后重跑完整流程覆盖生成物）；增量更新（只改部分小节）不进 v1，见「不做」清单。
 
 ### 5.5 调用模式
 
-- **creator：被动调用**（frontmatter 设 `disable-model-invocation: true`）。生成项目 skill 是一次性、有副作用、需用户配合的流程，必须用户显式触发（如 `/unityctl-project-skill-creator`），agent 不得在普通任务中顺手执行。
+- **creator：被动调用**（frontmatter 设 `disable-model-invocation: true`）。生成项目 skill 是一次性、有副作用、需用户配合的流程，必须用户显式触发（如 `/unityctl-project-skill-creator`），agent 不得在普通任务中顺手执行。兜底：宿主环境若不支持该字段，`description` 中须写明"仅在用户显式要求生成项目 skill 时使用"。
 - **生成物：主动调用**。agent 操作该项目 UI 时应自动加载。
 - 两者调用模式相反，这个差异本身是设计的一部分。
 
 ### 5.6 合格产物标准
 
-- 规则层坚持硬门槛：条条经 `find` 验证，验证不过不进规则层。
-- 用户口述且无法机械验证的信息不丢弃，写入时标注来源。
+- 规则层坚持硬门槛：Editor 可用时，条条经 `find` 验证，验证不过不进规则层。
+- 用户口述且无法机械验证的信息不丢弃，写入时标注来源；纯问答降级模式下全部规则按此处理（见 5.4）。
 - 无统一约定时的诚实降级产物（探测指引 + "无统一约定"声明）是合法结果。
 
 ## 六、v1 范围
@@ -138,7 +187,7 @@ E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 | 分发改造 | `skills.py` 单文件 → 目录分发，含两个官方 skill；更新对应测试 |
 | creator skill | 入口 `SKILL.md`（路由 + 共享原则）+ `flows/ui-location.md` |
 | 生成物模板 | 固定六节（见 5.4） |
-| 扩展文档 | 官方 skill 或 README 中补一节「如何为你的项目编写自定义 skill」 |
+| 扩展文档 | README 补一节「如何为你的项目编写自定义 skill」；官方 skill 主文件索引表中加一行链接指向它 |
 
 ### 不做（v1 明确砍掉）
 
@@ -152,6 +201,7 @@ E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 | 跨项目知识复用、UI 框架预设自动套用 | 易产生假规律 |
 | 在生成物里复述 unityctl 用法 | 双源过时 |
 | `skills init --template project` 模板命令 | 被 creator 覆盖大部分场景，暂不做 |
+| 生成物增量更新（只改部分小节） | 语义复杂（旧验证示例是否作废等）；v1 只支持全量重建 |
 
 ## 七、成功标准与量化约束
 
@@ -161,6 +211,7 @@ E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 2. 写入的每条识别规则都附带当场跑过的 `find` 示例（或明确标注"用户口述，未验证"）。
 3. 后续 UI 任务中，agent 能用规则层把"枚举界面 / 找最上方界面"从盲探变成 1-2 次精准查询。
 4. 无统一约定时诚实降级，不算失败。
+5. 纯问答降级路径可走通：Editor 不可用时仍能产出结构完整、来源标注齐全的生成物。
 
 量化约束（写进 flow 剧本）：
 
@@ -177,16 +228,17 @@ E 生成       按固定模板写入 .agents/skills/<游戏名>-ui/SKILL.md
 | 生成物长期无人维护 | 规则层为主体（腐烂慢）+ 自愈指引兜底；接受口述类信息逐步过时 |
 | creator 或生成物开始复述 CLI 用法 | 模板中机械禁止；review 时检查 |
 | 路由被 agent 即兴扩展 | 路由表封闭枚举，不认识的知识域明确拒绝 |
+| agent 不读 references、只凭主文件索引臆造参数 | 主文件索引明确要求"执行前必须先读对应 reference"；验收时抽查 |
 
 ## 九、测试与验收
 
-- Python 单测：`skills.py` 目录分发（init 不覆盖、update 整目录刷新、用户目录不触碰、版本渲染、两个官方 skill 同时分发）。
+- Python 单测：见第四节「测试」清单（目录分发、旧单文件升级、聚合响应、打包资源齐全等）。
 - 人工验收：在真实 Unity 项目上完整跑一次 creator（Editor 可用 + 纯问答降级两条路径），检查生成物六节齐全、规则均带验证示例、访谈次数在约束内。
 - 官方 skill 目录化后，抽查 agent 在典型任务（写 scenario、查错误码）中能否按索引找到对应 reference 文件。
 
 ## 十、落地顺序
 
-1. `skills.py` 目录分发改造 + 测试（其余一切的前置）。
+1. `skills.py` 目录分发改造 + `pyproject.toml` package-data 递归 glob + 测试（其余一切的前置）。
 2. 官方 `unityctl` skill 拆分为主文件 + `references/`。
 3. creator：入口 `SKILL.md` + `flows/ui-location.md` + 生成物模板。
 4. 扩展文档（如何手写自定义项目 skill）。
