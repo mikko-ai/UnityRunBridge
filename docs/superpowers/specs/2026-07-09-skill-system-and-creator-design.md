@@ -45,7 +45,7 @@ unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.m
 
 **也不维持单文件**：改为渐进式披露——
 
-- `SKILL.md` 收缩到百行以内：frontmatter、「改完代码后验证」主链路（refresh → play → stop → summary 判读）、环境准备、注意事项、能力索引表（每个能力 2-3 行 + 指向 `references/` 对应文件）。
+- `SKILL.md` 收缩到约百行（硬上限 120 行）：frontmatter、「改完代码后验证」主链路（refresh → play → stop → summary 判读）、环境准备、注意事项、能力索引表（每个能力 2-3 行 + 指向 `references/` 对应文件）。
 - `references/` 承载深度内容，agent 需要时才读对应文件。每个 reference 文件首段说明适用场景。
 - frontmatter 的 `description` 只写验证主链路的触发条件，不罗列全部子能力（避免触发面过宽导致整份加载）；主文件索引表中明确要求"执行下列能力前必须先读对应 reference 文件"。
 - 版本号仍写在主文件 frontmatter 的 `x-unityctl-version` 字段。
@@ -69,7 +69,7 @@ unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.m
 
 ### 安装语义
 
-- 官方分发清单固定为两个 skill 目录：`unityctl` 与 `unityctl-project-skill-creator`，一次 `init`/`update` 依次处理两者，互不影响（无原子回滚；单个失败不阻止另一个）。
+- 官方分发清单固定为两个 skill 目录：`unityctl` 与 `unityctl-project-skill-creator`，一次 `init`/`update` 依次处理两者；任一失败则整个命令失败（`ok: false`、退出码 1，已写入的不回滚）——失败只可能来自内置资源损坏或 IO 错误，无需部分成功语义。
 - `skills init`：目标 skill 目录已存在（含旧版单文件形态，即目录下只有 `SKILL.md`）则保持原样返回 `already_installed`，并附 `hint` 提示可运行 `skills update` 升级为目录结构；不存在则整目录写入。
 - `skills update`：渲染后的内置目录树与目标目录树逐文件比较（文件集合 + 内容全等，忽略 mtime），有差异则**先删除整个目标 skill 目录再整树写入**（自然覆盖旧单文件安装、清除已删除的旧文件），无差异返回 `up_to_date`。
 - 版本占位符 `__UNITYCTL_VERSION__` 与 `x-unityctl-version` 字段：两个 skill 的主 `SKILL.md` 都必须包含，渲染与版本读取逻辑对两者一致；`references/`、`flows/` 文件不含占位符，按原文分发。
@@ -91,7 +91,7 @@ unityctl 当前随 CLI 包分发一份官方 agent skill（`skill_assets/SKILL.m
 }
 ```
 
-- 顶层 `code` 聚合规则：任一 skill 失败为错误（`ok: false`，退出码 1）；否则取"变更程度最高"的 action（`installed`/`updated` > `already_installed`/`up_to_date`）。
+- 顶层 `code` 聚合规则：任一 skill 失败为错误（`ok: false`，退出码 1）；否则按四级全序取"变更程度最高"的 action（`installed` > `updated` > `already_installed` > `up_to_date`）。
 - `already_installed` 时保留现有 `hint` 行为。
 
 ### 打包

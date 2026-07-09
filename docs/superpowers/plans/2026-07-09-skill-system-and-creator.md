@@ -43,6 +43,7 @@
   - `SkillResult(name, skill_path, action, version, previous_version)`，`skill_path` 是**目录**。
   - `read_skill_version(skill_dir: Path) -> str | None`（参数从文件改为目录）。
   - CLI 输出 schema：`{"ok", "code", "version", "skills": [{"name", "action", "skillPath", "previousVersion"?}], "hint"?}`。
+  - 聚合 `code` 是四级全序（不是两组等价）：`installed` > `updated` > `already_installed` > `up_to_date`；`installed` 与 `updated` 并存时顶层为 `installed`。任一 skill 抛 `SkillError` 则整个命令失败（`ok: false`、退出码 1，已写入的不回滚）。
 
 - [ ] **Step 1: 移动现有 skill 资源到子目录**
 
@@ -312,6 +313,7 @@ def test_real_assets_install(tmp_path, capsys):
     output = run_skills(project, "init", capsys)
 
     names = [s["name"] for s in output["skills"]]
+    # Task 1 阶段内置资源只有 unityctl；完整双 skill 断言在 Task 3 补强，此处勿提前改严
     assert "unityctl" in names
     skill_md = project / ".agents" / "skills" / "unityctl" / "SKILL.md"
     content = skill_md.read_text(encoding="utf-8")
@@ -474,7 +476,11 @@ def install_skill(
 def install_all_skills(
     skills_dir: Path, version: str, overwrite: bool
 ) -> list[SkillResult]:
-    """依次安装全部内置 skill，互不影响（无原子回滚）。"""
+    """依次安装全部内置 skill。
+
+    任一失败（内置资源损坏、IO 错误）直接抛 SkillError 让整个命令失败，
+    已写入的不回滚——失败源头都是环境级问题，部分成功语义没有价值。
+    """
     return [
         install_skill(skills_dir, name, version, overwrite)
         for name in distributed_skill_names()
@@ -504,6 +510,21 @@ from unityctl.skills import (
             "把 CLI 内置的官方 skills（unityctl 参考手册、project skill creator）"
             f"安装到项目的 skills 目录，默认 {DEFAULT_SKILLS_DIRNAME}/。"
         ),
+        formatter_class=_HelpFormatter,
+    )
+```
+
+同时更新 `skills_init` / `skills_update` 两个子命令的 help（第 903-912 行附近），新语义是树比较而非"总是覆盖"：
+
+```python
+    skills_init = skills_subparsers.add_parser(
+        "init",
+        help="安装 skills（目录已存在时不覆盖）",
+        formatter_class=_HelpFormatter,
+    )
+    skills_update = skills_subparsers.add_parser(
+        "update",
+        help="把 skills 刷新为当前 CLI 版本内置内容（有差异时整目录覆盖；无差异返回 up_to_date；未安装则直接安装）",
         formatter_class=_HelpFormatter,
     )
 ```
@@ -579,10 +600,10 @@ cd src/unityctl && uv run pytest -q
 - [ ] **Step 8: 验证 wheel 包含嵌套资源**
 
 ```bash
-cd src/unityctl && uv build 2>/dev/null && unzip -l dist/*.whl | grep skill_assets
+cd src/unityctl && rm -rf dist && uv build && unzip -l dist/unity_run_bridge-*.whl | grep skill_assets
 ```
 
-Expected: 输出中含 `skill_assets/unityctl/SKILL.md`。验证后清理 `dist/`（不提交）。
+Expected: `uv build` 成功，输出中含 `skill_assets/unityctl/SKILL.md`。验证后 `rm -rf dist`（不提交）。
 
 - [ ] **Step 9: Commit**
 
@@ -608,7 +629,7 @@ git add -A src/unityctl && git commit -m "feat: distribute agent skills as direc
 - Consumes: Task 1 的目录分发机制（子目录文件自动进入分发树）。
 - Produces: 无代码接口；Task 4 会在本任务产出的主 SKILL.md 索引表末尾加一行。
 
-**内容搬运规则（不允许静默删减）：** 现有 `skill_assets/unityctl/SKILL.md` 的章节按下表**原样搬运**到 references 文件（含全部代码块与表格）；每个 reference 文件加统一头部（见 Step 1 模板）。
+**内容搬运规则（不允许静默删减）：** 现有 `skill_assets/unityctl/SKILL.md` 的章节按下表**原样搬运**到 references 文件（含全部代码块与表格）；每个 reference 文件加统一头部（见 Step 1 模板）。唯一允许的改动是**修正跨文件指称**：原文中"见上文"/"见下文"若指向的内容拆到了别的文件，改为指向具体文件（已知两处：错误码表 `node_not_found` 行的"见上文"→"见 `hierarchy.md`"；录制节指向 Scenario 的"见下文"→"见 `scenario.md`"；搬运时再全文检查一遍是否还有其他处）。
 
 | 现有章节标题 | 目标文件 |
 |---|---|
@@ -729,8 +750,8 @@ x-unityctl-version: __UNITYCTL_VERSION__
 ## 共享原则（所有 flow 必须遵守）
 
 1. **约定优先于路径**：产出以规则层（架构级约定）为主体，规则腐烂慢、能直接翻译成查询；不生成大而全的路径快照。
-2. **验证优先于生成**：每条候选规则写入前必须翻译成 `unityctl` 查询当场跑一遍，结果与预期比对，通过才写入，并把验证过的查询作为示例写进生成物。
-3. **诚实原则**：例外如实记录；覆盖率不足的规则标注「部分适用」及范围；完全无规律时诚实输出「该项目无统一约定」——这是合法产物，不算失败。禁止把未经验证的规则标注为已验证；用户口述、无法机械验证的信息可以写入，但必须标注 `用户口述，未验证`。
+2. **验证优先于生成**：每条候选规则写入前必须翻译成 `unityctl hierarchy find` 查询当场跑一遍，结果与预期比对，通过才写入，并把验证过的查询作为示例写进生成物。
+3. **诚实原则**：例外如实记录；覆盖率不足的规则标注「部分适用」及范围；完全无规律时诚实输出「该项目无统一约定」并把规则层降级为探测指引——这是合法产物，不算失败。禁止把未经验证的规则标注为已验证；用户口述、无法机械验证的信息可以写入，但必须标注 `用户口述，未验证`。
 4. **生成物克制**：只写项目知识，禁止复述任何 unityctl 命令用法（用法以官方 unityctl skill 为准）；产物为单份 SKILL.md，不建多文件知识库。
 5. **内置自愈**：生成物末尾必须包含「自愈指引」一节（模板见各 flow）。
 
@@ -765,7 +786,7 @@ x-unityctl-version: __UNITYCTL_VERSION__
 ## 阶段 A：环境检查
 
 1. 运行 `unityctl doctor`。
-2. Bridge 可达（或 `unityctl start` 能成功启动 Editor）→ 走探测路径（阶段 B-D）。
+2. Bridge 可达（或 `unityctl start` 能成功启动 Editor）→ 运行 `unityctl status` 确认 `editorState`，然后走探测路径（阶段 B-D）。
 3. Editor 不可用且无法启动 → 询问用户：走「纯问答降级模式」（见文末），还是等环境就绪后再来。
 
 ## 阶段 B：探测（严格遵守上限）
@@ -801,6 +822,8 @@ x-unityctl-version: __UNITYCTL_VERSION__
 
 每条候选规则翻译成 `find` 查询跑一遍：结果符合预期 → 写入规则层（附该查询）；覆盖率不足 → 标「部分适用」+ 适用范围；不符 → 进例外清单或丢弃。
 
+四类候选规则全部验证失败（该项目无统一约定）时，不放弃生成：在「界面识别与枚举」节写明「该项目无统一约定」，并降级为**探测指引**——记录本次探测中实际有效的定位方式（例如"UI 集中在 `<某根节点>` 下，需逐层 `tree` 展开确认"），这是合法产物。
+
 ## 阶段 E：生成
 
 - `<游戏名>` 默认取 `ProjectSettings/ProjectSettings.asset` 的 `productName`（读不到就问用户），转小写、空格与非法字符转 `-`。
@@ -811,7 +834,7 @@ x-unityctl-version: __UNITYCTL_VERSION__
 ~~~markdown
 ---
 name: <游戏名>-ui
-description: 在 <游戏名> 项目中定位、枚举 UI 界面或判断界面层级时使用。
+description: 在 <游戏名> 项目中定位、枚举、操作 UI 界面或判断界面层级时使用。
 ---
 
 # <游戏名> UI 定位
@@ -822,7 +845,7 @@ description: 在 <游戏名> 项目中定位、枚举 UI 界面或判断界面�
 
 ## 界面识别与枚举
 
-（识别规则；每条附验证过的具体查询与覆盖率说明）
+（识别规则；每条附验证过的具体查询与覆盖率说明。无统一约定时写「该项目无统一约定」+ 探测指引，见阶段 D）
 
 ## 最上方判断
 
@@ -875,15 +898,25 @@ git add -A src/unityctl && git commit -m "feat: add unityctl-project-skill-creat
 
 ---
 
-### Task 4: 用户扩展文档
+### Task 4: 用户扩展文档 + README 现状同步
 
 **Files:**
-- Modify: `README.md`（新增一节，放在现有 skills 相关说明附近；若无相关章节则加在文档靠后位置）
+- Modify: `README.md`（更新既有 Agent Skill 相关表述 + 新增自定义 skill 一节）
 - Modify: `src/unityctl/unityctl/skill_assets/unityctl/SKILL.md`（能力索引表后加一行说明）
 
 **Interfaces:**
 - Consumes: Task 2 的主 SKILL.md、Task 3 的 creator。
 - Produces: 无。
+
+- [ ] **Step 0: 同步 README 中已过时的 skill 表述**
+
+Task 1 的 `git mv` 和语义变更使 README 以下位置失效，逐处更新（行号为当前值，执行时以 `rg -n "skill" README.md` 实际结果为准）：
+
+- 第 128 行命令表：`安装 / 更新 agent skill（SKILL.md）` → `安装 / 更新内置 agent skills（unityctl 参考手册 + project skill creator）`。
+- 第 361 行链接：`src/unityctl/unityctl/skill_assets/SKILL.md` → `src/unityctl/unityctl/skill_assets/unityctl/SKILL.md`。
+- 第 365 行：`一份 ... agent skill（SKILL.md）` 改为目录形态、两个 skill 的表述（`unityctl` 参考手册 + `unityctl-project-skill-creator`）。
+- 第 373 行：`默认安装到 ... .agents/skills/unityctl/SKILL.md` → `默认安装到 Unity 项目的 .agents/skills/ 下（每个 skill 一个目录）`。
+- 第 382-383 行语义说明改为：`skills init`：目录已存在时不覆盖，返回 `already_installed`；`skills update`：与内置内容有差异时整目录覆盖刷新（未安装则直接安装，无差异返回 `up_to_date`）。
 
 - [ ] **Step 1: README 新增章节**
 
@@ -918,7 +951,7 @@ Expected: 全部 PASS。
 - [ ] **Step 4: Commit**
 
 ```bash
-git add README.md src/unityctl/unityctl/skill_assets/unityctl/SKILL.md && git commit -m "docs: document custom project skill authoring and creator entry point"
+git add README.md src/unityctl/unityctl/skill_assets/unityctl/SKILL.md && git commit -m "docs: sync skill docs to directory distribution and add custom skill guide"
 ```
 
 ---
