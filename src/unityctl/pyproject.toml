@@ -22,4 +22,4 @@ where = ["."]
 include = ["unityctl*"]
 
 [tool.setuptools.package-data]
-unityctl = ["schemas/*.json", "skill_assets/*.md"]
+unityctl = ["schemas/*.json", "skill_assets/**/*.md"]

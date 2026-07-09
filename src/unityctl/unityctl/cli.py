@@ -59,7 +59,7 @@ from unityctl.session import (
 from unityctl.skills import (
     DEFAULT_SKILLS_DIRNAME,
     SkillError,
-    install_skill,
+    install_all_skills,
     resolve_skills_dir,
 )
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
@@ -886,10 +886,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     skills = subparsers.add_parser(
         "skills",
-        help="安装或更新 agent skill（SKILL.md）",
+        help="安装或更新内置 agent skills（目录形态）",
         description=(
-            "把 CLI 内置的 unityctl skill 安装到项目的 skills 目录，"
-            f"默认 {DEFAULT_SKILLS_DIRNAME}/，供 coding agent 学习 Unity 验证流程。"
+            "把 CLI 内置的官方 skills（unityctl 参考手册、project skill creator）"
+            f"安装到项目的 skills 目录，默认 {DEFAULT_SKILLS_DIRNAME}/。"
         ),
         formatter_class=_HelpFormatter,
     )
@@ -902,12 +902,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     skills_init = skills_subparsers.add_parser(
         "init",
-        help="安装 skill（已存在时不覆盖）",
+        help="安装 skills（目录已存在时不覆盖）",
         formatter_class=_HelpFormatter,
     )
     skills_update = skills_subparsers.add_parser(
         "update",
-        help="把 skill 刷新为当前 CLI 版本内置内容（总是覆盖；未安装则直接安装）",
+        help="把 skills 刷新为当前 CLI 版本内置内容（有差异时整目录覆盖；无差异返回 up_to_date；未安装则直接安装）",
         formatter_class=_HelpFormatter,
     )
     for sub in (skills_init, skills_update):
@@ -1942,6 +1942,10 @@ def cmd_health(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+# 聚合 code 取"变更程度最高"的 action（索引越小优先级越高）
+_SKILL_ACTION_PRIORITY = ["installed", "updated", "already_installed", "up_to_date"]
+
+
 def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
     # 绝对路径 --target 不依赖项目根目录，找不到项目也允许安装
     project_path: Path | None = None
@@ -1952,7 +1956,7 @@ def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
 
     try:
         skills_dir = resolve_skills_dir(project_path, args.target)
-        result = install_skill(
+        results = install_all_skills(
             skills_dir,
             version=__version__,
             overwrite=args.skills_command == "update",
@@ -1960,16 +1964,25 @@ def cmd_skills(args: argparse.Namespace) -> dict[str, Any]:
     except SkillError as exc:
         raise CliError("invalid_request", str(exc)) from exc
 
+    entries: list[dict[str, Any]] = []
+    for result in results:
+        entry: dict[str, Any] = {
+            "name": result.name,
+            "action": result.action,
+            "skillPath": str(result.skill_path),
+        }
+        if result.previous_version is not None and result.previous_version != result.version:
+            entry["previousVersion"] = result.previous_version
+        entries.append(entry)
+
     payload: dict[str, Any] = {
         "ok": True,
-        "code": result.action,
-        "skillPath": str(result.skill_path),
-        "version": result.version,
+        "code": min((r.action for r in results), key=_SKILL_ACTION_PRIORITY.index),
+        "version": __version__,
+        "skills": entries,
     }
-    if result.previous_version is not None and result.previous_version != result.version:
-        payload["previousVersion"] = result.previous_version
-    if result.action == "already_installed":
-        payload["hint"] = "skill 已存在且未被覆盖；如需刷新请运行 unityctl skills update"
+    if any(r.action == "already_installed" for r in results):
+        payload["hint"] = "已存在的 skill 未被覆盖；如需刷新为当前版本内容请运行 unityctl skills update"
     return payload
 
 
