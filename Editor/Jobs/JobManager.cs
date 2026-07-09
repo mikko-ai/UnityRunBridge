@@ -89,17 +89,15 @@ namespace Mk.UnityAgentBridge.Editor.Jobs
         }
 
         /// <summary>
-        /// Play Mode 下用隐藏 MonoBehaviour 承载 WaitForEndOfFrame；非 Play Mode 下没有稳定的帧渲染
-        /// 时机可等，退化为强制推一次 player loop 后挂到下一次 EditorApplication.update tick 执行。
+        /// 统一用 EditorApplication.update 的下一个 tick 承载"帧末"回调：不用 MonoBehaviour +
+        /// WaitForEndOfFrame，因为本程序集是 Editor-only（asmdef 限定 includePlatforms=Editor），
+        /// Play Mode 下对运行时 GameObject 执行 AddComponent&lt;T&gt;() 会被 Unity 拒绝
+        /// （"Can't add script behaviour ... because it is an editor script"），随后引用为 null
+        /// 导致空引用。先强制推一次 player loop 保证画面已渲染，再等下一次 update tick 执行，
+        /// Play Mode 与非 Play Mode 共用同一路径。
         /// </summary>
         public static void ScheduleEndOfFrame(Action callback)
         {
-            if (EditorApplication.isPlaying)
-            {
-                EndOfFrameRunner.Schedule(callback);
-                return;
-            }
-
             EditorApplication.QueuePlayerLoopUpdate();
             EditorApplication.CallbackFunction wrapper = null;
             wrapper = () =>
