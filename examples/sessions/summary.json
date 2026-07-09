@@ -13,10 +13,10 @@
   "watchedCount": 1,
   "watchedLogs": [
     {
-      "line": 2,
+      "line": 3,
       "type": "Warning",
       "message": "Example warning for agent review",
-      "sequence": 2,
+      "sequence": 3,
       "playModeFrame": 112,
       "scenePath": "Assets/Scenes/Login.unity"
     }
@@ -24,5 +24,18 @@
   "startedAt": "2026-06-30T18:30:14Z",
   "endedAt": "2026-06-30T18:31:02Z",
   "durationMs": 48000,
-  "failedReason": null
+  "failedReason": null,
+  "runs": [
+    {
+      "runIndex": 1,
+      "startedAt": "2026-06-30T18:30:16.100Z",
+      "endedAt": "2026-06-30T18:31:01.500Z",
+      "sequenceStart": 2,
+      "sequenceEnd": 4,
+      "logCount": 1,
+      "problemCount": 0,
+      "blockingProblemCount": 0
+    }
+  ],
+  "manualInterventionDetected": false
 }

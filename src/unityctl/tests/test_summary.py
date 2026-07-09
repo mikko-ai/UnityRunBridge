@@ -341,6 +341,126 @@ def test_build_summary_omits_scenario_key_when_not_provided(tmp_path):
     assert "scenario" not in summary
 
 
+def test_build_summary_groups_logs_by_run_index(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        session / "unity-console.jsonl",
+        [
+            {"sequence": 1, "type": "Log", "message": "bridge listening", "runIndex": 0},
+            {
+                "time": "2026-07-08T11:51:10.000Z",
+                "sequence": 2,
+                "type": "BridgeEvent",
+                "event": "runStarted",
+                "message": "runStarted (run 1)",
+                "runIndex": 1,
+            },
+            {"sequence": 3, "type": "Log", "message": "Awake", "runIndex": 1},
+            {"sequence": 4, "type": "Error", "message": "run1 error", "runIndex": 1},
+            {
+                "time": "2026-07-08T11:51:48.000Z",
+                "sequence": 5,
+                "type": "BridgeEvent",
+                "event": "runEnded",
+                "message": "runEnded (run 1)",
+                "runIndex": 1,
+            },
+            {
+                "time": "2026-07-08T11:52:25.000Z",
+                "sequence": 6,
+                "type": "BridgeEvent",
+                "event": "runStarted",
+                "message": "runStarted (run 2)",
+                "runIndex": 2,
+            },
+            {"sequence": 7, "type": "Exception", "message": "run2 exception", "runIndex": 2},
+        ],
+    )
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    # BridgeEvent 边界行不计入日志统计
+    assert summary["logCount"] == 4
+    assert summary["manualInterventionDetected"] is True
+    assert [run["runIndex"] for run in summary["runs"]] == [1, 2]
+
+    run1, run2 = summary["runs"]
+    assert run1["startedAt"] == "2026-07-08T11:51:10.000Z"
+    assert run1["endedAt"] == "2026-07-08T11:51:48.000Z"
+    assert run1["sequenceStart"] == 2
+    assert run1["sequenceEnd"] == 5
+    assert run1["logCount"] == 2
+    assert run1["problemCount"] == 1
+    assert run1["blockingProblemCount"] == 0
+
+    # 第二轮仍在运行（没有 runEnded）
+    assert run2["startedAt"] == "2026-07-08T11:52:25.000Z"
+    assert run2["endedAt"] is None
+    assert run2["logCount"] == 1
+    assert run2["problemCount"] == 1
+    assert run2["blockingProblemCount"] == 1
+
+
+def test_build_summary_single_run_is_not_manual_intervention(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        session / "unity-console.jsonl",
+        [
+            {
+                "time": "2026-07-08T11:51:10.000Z",
+                "sequence": 1,
+                "type": "BridgeEvent",
+                "event": "runStarted",
+                "message": "runStarted (run 1)",
+                "runIndex": 1,
+            },
+            {"sequence": 2, "type": "Log", "message": "Awake", "runIndex": 1},
+            {
+                "time": "2026-07-08T11:51:48.000Z",
+                "sequence": 3,
+                "type": "BridgeEvent",
+                "event": "runEnded",
+                "message": "runEnded (run 1)",
+                "runIndex": 1,
+            },
+        ],
+    )
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert summary["manualInterventionDetected"] is False
+    assert len(summary["runs"]) == 1
+    assert summary["status"] == "passed"
+
+
+def test_build_summary_without_runs_has_empty_runs(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    (session / "session.json").write_text(
+        json.dumps({"startedAt": None, "endedAt": None}),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        session / "unity-console.jsonl",
+        [{"sequence": 1, "type": "Log", "message": "edit mode only", "runIndex": 0}],
+    )
+
+    summary = build_summary(session, rules={"ignore": []})
+
+    assert summary["runs"] == []
+    assert summary["manualInterventionDetected"] is False
+
+
 def test_build_summary_embeds_metrics_section_when_metrics_jsonl_present(tmp_path):
     session = tmp_path / "session"
     session.mkdir()

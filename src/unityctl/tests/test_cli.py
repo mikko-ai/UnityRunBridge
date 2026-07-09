@@ -677,6 +677,57 @@ def test_logs_command_limit_applies_after_filtering(tmp_path, capsys):
     assert [row["line"] for row in output["logs"]] == [4, 5]
 
 
+def test_logs_command_filters_bridge_events_by_default(tmp_path, capsys):
+    session = tmp_path / "s1"
+    rows = [
+        {"sequence": 1, "type": "BridgeEvent", "event": "runStarted", "message": "runStarted (run 1)", "runIndex": 1},
+        {"sequence": 2, "type": "Log", "message": "Awake", "runIndex": 1},
+        {"sequence": 3, "type": "BridgeEvent", "event": "runEnded", "message": "runEnded (run 1)", "runIndex": 1},
+    ]
+    make_console_log(session, rows)
+
+    exit_code = cli.main(["logs", "--session-path", str(session)])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["totalCount"] == 3
+    assert output["matchedCount"] == 1
+    assert [row["sequence"] for row in output["logs"]] == [2]
+
+
+def test_logs_command_include_events_shows_bridge_events(tmp_path, capsys):
+    session = tmp_path / "s1"
+    rows = [
+        {"sequence": 1, "type": "BridgeEvent", "event": "runStarted", "message": "runStarted (run 1)", "runIndex": 1},
+        {"sequence": 2, "type": "Log", "message": "Awake", "runIndex": 1},
+    ]
+    make_console_log(session, rows)
+
+    exit_code = cli.main(["logs", "--session-path", str(session), "--include-events"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert [row["sequence"] for row in output["logs"]] == [1, 2]
+
+
+def test_logs_command_filters_by_run_index(tmp_path, capsys):
+    session = tmp_path / "s1"
+    rows = [
+        {"sequence": 1, "type": "Log", "message": "bridge listening", "runIndex": 0},
+        {"sequence": 2, "type": "Log", "message": "run1 Awake", "runIndex": 1},
+        {"sequence": 3, "type": "Log", "message": "run2 Awake", "runIndex": 2},
+        {"sequence": 4, "type": "Error", "message": "run2 error", "runIndex": 2},
+    ]
+    make_console_log(session, rows)
+
+    exit_code = cli.main(["logs", "--session-path", str(session), "--run", "2"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["matchedCount"] == 2
+    assert [row["sequence"] for row in output["logs"]] == [3, 4]
+
+
 def test_errors_command_includes_line_numbers(tmp_path, capsys):
     project = make_unity_project(tmp_path / "Game")
     session = project / ".unity-agent" / "sessions" / "2026-07-06_100000_s1"

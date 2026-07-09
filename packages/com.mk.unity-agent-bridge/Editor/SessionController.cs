@@ -10,6 +10,7 @@ namespace Mk.UnityAgentBridge.Editor
         private const string SessionIdKey = "Mk.UnityAgentBridge.SessionId";
         private const string SessionPathKey = "Mk.UnityAgentBridge.SessionPath";
         private const string SequenceKey = "Mk.UnityAgentBridge.LogSequence";
+        private const string RunIndexKey = "Mk.UnityAgentBridge.RunIndex";
 
         public static void RegisterRoutes()
         {
@@ -31,6 +32,7 @@ namespace Mk.UnityAgentBridge.Editor
         private static string currentSessionPath = string.Empty;
         private static SessionLogWriter logWriter;
         private static int sequence;
+        private static int runIndex;
 
         public static bool HasActiveSession => logWriter != null;
         public static string CurrentSessionId => currentSessionId;
@@ -56,8 +58,11 @@ namespace Mk.UnityAgentBridge.Editor
             currentSessionPath = Path.GetFullPath(sessionPath);
             string logPath = Path.Combine(currentSessionPath, "unity-console.jsonl");
             sequence = 0;
+            // session 在 Play Mode 进行中启动（如 play 收到 already_playing）时，把正在进行的这一轮记为 run 1。
+            runIndex = EditorApplication.isPlaying ? 1 : 0;
             logWriter = new SessionLogWriter(logPath);
             Application.logMessageReceived += OnLogMessageReceived;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             RememberSession(currentSessionId, currentSessionPath);
 
             return new SessionStartResponse
@@ -82,11 +87,13 @@ namespace Mk.UnityAgentBridge.Editor
             }
 
             Application.logMessageReceived -= OnLogMessageReceived;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             logWriter.Dispose();
             logWriter = null;
             currentSessionId = string.Empty;
             currentSessionPath = string.Empty;
             sequence = 0;
+            runIndex = 0;
             ForgetSession();
             return BridgeResponse.Success("session_ended", "session ended");
         }
@@ -116,9 +123,12 @@ namespace Mk.UnityAgentBridge.Editor
             currentSessionPath = Path.GetFullPath(sessionPath);
             string logPath = Path.Combine(currentSessionPath, "unity-console.jsonl");
             sequence = SessionState.GetInt(SequenceKey, 0);
+            runIndex = SessionState.GetInt(RunIndexKey, 0);
             logWriter = new SessionLogWriter(logPath);
             Application.logMessageReceived -= OnLogMessageReceived;
             Application.logMessageReceived += OnLogMessageReceived;
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
         }
 
         public static SessionStatusResponse GetStatus()
@@ -148,7 +158,47 @@ namespace Mk.UnityAgentBridge.Editor
             }
 
             sequence += 1;
-            logWriter.Write(condition, stackTrace, type, sequence);
+            logWriter.Write(condition, stackTrace, type, sequence, runIndex);
+            SessionState.SetInt(SequenceKey, sequence);
+        }
+
+        /// <summary>
+        /// Play Mode 运行边界：会话生命周期与 Play Mode 保持解耦——手动进/退 Play 不结束
+        /// 会话，但每一轮运行的边界与轮次（runIndex）会如实落进 unity-console.jsonl，
+        /// 供 CLI 侧按轮分组与人工干预检测（一个 session 内 CLI 只触发一轮 play，
+        /// runIndex >= 2 即存在手动干预）。
+        ///
+        /// 时机选择：
+        /// - runStarted 用 ExitingEditMode（进 Play 流程开始、domain reload 之前）——
+        ///   EnteredPlayMode 在 Awake 之后才触发，若在那里递增会把新一轮的 reload 噪音
+        ///   与 Awake 日志错标到上一轮；runIndex 递增后立即持久化，reload 后由
+        ///   RestoreActiveSession 恢复。
+        /// - runEnded 用 EnteredEditMode（退出流程完全结束）——ExitingPlayMode 时
+        ///   OnDestroy 日志尚未产生，过早收尾会把它们排除在本轮之外。
+        /// </summary>
+        private static void OnPlayModeStateChanged(PlayModeStateChange change)
+        {
+            if (logWriter == null)
+            {
+                return;
+            }
+
+            if (change == PlayModeStateChange.ExitingEditMode)
+            {
+                runIndex += 1;
+                SessionState.SetInt(RunIndexKey, runIndex);
+                WriteBoundaryEvent("runStarted");
+            }
+            else if (change == PlayModeStateChange.EnteredEditMode)
+            {
+                WriteBoundaryEvent("runEnded");
+            }
+        }
+
+        private static void WriteBoundaryEvent(string eventName)
+        {
+            sequence += 1;
+            logWriter.WriteEvent(eventName, sequence, runIndex);
             SessionState.SetInt(SequenceKey, sequence);
         }
 
@@ -157,6 +207,7 @@ namespace Mk.UnityAgentBridge.Editor
             SessionState.SetString(SessionIdKey, sessionId);
             SessionState.SetString(SessionPathKey, sessionPath);
             SessionState.SetInt(SequenceKey, sequence);
+            SessionState.SetInt(RunIndexKey, runIndex);
         }
 
         private static void ForgetSession()
@@ -164,6 +215,7 @@ namespace Mk.UnityAgentBridge.Editor
             SessionState.EraseString(SessionIdKey);
             SessionState.EraseString(SessionPathKey);
             SessionState.EraseInt(SequenceKey);
+            SessionState.EraseInt(RunIndexKey);
         }
 
         private static string GetProjectRoot()

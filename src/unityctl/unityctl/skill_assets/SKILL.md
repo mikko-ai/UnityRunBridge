@@ -31,6 +31,7 @@ unityctl stop --latest
 
 - `refresh` 返回的 `compilationSucceeded` 为 `false` 时，`compilationErrors` 数组包含文件、行号和错误信息，先修复编译错误再继续。
 - `summary` 的 `status` 为 `passed` 表示本次运行没有问题；`problem_detected` 表示出现了普通 `Error` 日志（不必然是业务失败，需要结合日志判断）；`failed` 表示出现 `Exception`/`Assert` 等 blocking problem，或发生了进程级失败（`failedReason` 字段记录原因，如 `compilation_failed`、`timeout`、`editor_exited`）。
+- `summary` 的 `manualInterventionDetected` 为 `true` 表示 session 期间有人在 Unity Editor 中手动重新进入过 Play Mode——日志和问题统计混入了非受控运行，不要直接采信整体结论：先看 `runs` 数组（按 Play Mode 轮次分组的 `problemCount`/`blockingProblemCount`），用 `unityctl logs --run 1` 只看 CLI 触发的第一轮；如果问题出在手动轮次，建议重新 `play` 一个干净的 session 复现后再下结论。
 
 ## 环境准备
 
@@ -73,9 +74,13 @@ sed -n '120,140p' <sessionPath>/unity-console.jsonl
 unityctl logs --latest --type Error,Exception   # 按日志类型过滤
 unityctl logs --latest --after-sequence 500     # 只看 sequence > 500 的增量日志
 unityctl logs --latest --limit 20               # 过滤后只取最近 N 条（默认 100）
+unityctl logs --latest --run 1                  # 只看第 1 轮 Play Mode 运行的日志
+unityctl logs --latest --include-events         # 包含运行边界事件行（type=BridgeEvent，默认过滤）
 ```
 
 `--after-sequence` 适合"要验证的行为发生在运行后期"的场景：先让游戏跑完初始化，用 `logs --latest --limit 1` 记下当前 sequence 作为游标，触发目标操作后只读游标之后的新日志，跳过全部启动噪音。输出中的 `totalCount`/`matchedCount` 分别是全量条数与命中条数。所有过滤只影响查询结果，`unity-console.jsonl` 始终保留完整日志。
+
+每条日志带 `runIndex` 字段，标记它属于 session 内第几轮 Play Mode 运行（`0` 表示首轮运行开始前的编辑期日志）；每轮的起止由 Bridge 写入的 `BridgeEvent` 边界行（`runStarted`/`runEnded`）标出。一个 session 内 CLI 只触发一轮 play，出现 `runIndex >= 2` 的日志即说明有人手动重新进入过 Play Mode（summary 会同步给出 `manualInterventionDetected: true`），此时用 `--run` 把受控轮次和手动轮次分开判读。
 
 ```bash
 unityctl open-scene <场景路径>         # 在 Editor 中打开场景

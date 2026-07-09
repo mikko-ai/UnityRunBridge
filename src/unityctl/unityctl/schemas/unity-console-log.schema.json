@@ -2,46 +2,116 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mk.example/schemas/unity-agent-bridge/unity-console-log.schema.json",
   "title": "Unity Agent Bridge Console Log Entry",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "time",
-    "sequence",
-    "type",
-    "message",
-    "stackTrace",
-    "isPlayMode",
-    "playModeFrame",
-    "scenePath"
+  "description": "unity-console.jsonl 中的一行：普通 Unity Console 日志，或 Bridge 写入的 Play Mode 运行边界事件（type=BridgeEvent）。两类行共用同一条 sequence 链。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/logEntry"
+    },
+    {
+      "$ref": "#/$defs/bridgeEventEntry"
+    }
   ],
-  "properties": {
-    "time": {
-      "type": "string",
-      "format": "date-time"
+  "$defs": {
+    "logEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time",
+        "sequence",
+        "type",
+        "message",
+        "stackTrace",
+        "isPlayMode",
+        "playModeFrame",
+        "scenePath",
+        "runIndex"
+      ],
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "stackTrace": {
+          "type": "string"
+        },
+        "isPlayMode": {
+          "type": "boolean"
+        },
+        "playModeFrame": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "scenePath": {
+          "type": "string"
+        },
+        "runIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "该日志属于第几轮 Play Mode 运行：发生在第 N 轮开始（runStarted）之后、第 N+1 轮开始之前的日志标记为 N；0 表示首轮运行开始前的编辑期日志。"
+        }
+      }
     },
-    "sequence": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "type": {
-      "type": "string",
-      "enum": ["Log", "Warning", "Error", "Exception", "Assert"]
-    },
-    "message": {
-      "type": "string"
-    },
-    "stackTrace": {
-      "type": "string"
-    },
-    "isPlayMode": {
-      "type": "boolean"
-    },
-    "playModeFrame": {
-      "type": "integer",
-      "minimum": -1
-    },
-    "scenePath": {
-      "type": "string"
+    "bridgeEventEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time",
+        "sequence",
+        "type",
+        "event",
+        "message",
+        "isPlayMode",
+        "playModeFrame",
+        "scenePath",
+        "runIndex"
+      ],
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "BridgeEvent"
+        },
+        "event": {
+          "type": "string",
+          "enum": ["runStarted", "runEnded"],
+          "description": "runStarted 在进入 Play Mode 流程开始时（domain reload 之前）写入并递增 runIndex；runEnded 在退出流程完全结束（EnteredEditMode）后写入。"
+        },
+        "message": {
+          "type": "string"
+        },
+        "isPlayMode": {
+          "type": "boolean"
+        },
+        "playModeFrame": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "scenePath": {
+          "type": "string"
+        },
+        "runIndex": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 }

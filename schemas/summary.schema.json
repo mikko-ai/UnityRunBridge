@@ -21,7 +21,9 @@
     "startedAt",
     "endedAt",
     "durationMs",
-    "failedReason"
+    "failedReason",
+    "runs",
+    "manualInterventionDetected"
   ],
   "properties": {
     "status": {
@@ -99,6 +101,17 @@
       "type": ["string", "null"],
       "description": "当 session.json 的 status 为 failed（进程级失败，如编译失败/超时/Editor 退出）时的原因。"
     },
+    "runs": {
+      "type": "array",
+      "description": "按 Play Mode 轮次（unity-console.jsonl 中的 runIndex）分组的统计，按 runIndex 升序。",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    },
+    "manualInterventionDetected": {
+      "type": "boolean",
+      "description": "一个 session 内 CLI 只触发一轮 play，出现第二轮即说明有人在 Editor 中手动重新进入过 Play Mode。为 true 时本次结果可能混入非受控运行，建议重跑后再下结论。"
+    },
     "scenario": {
       "description": "仅当该 session 由 `unityctl scenario run` 产生时存在；断言失败视为 blocking，与 Exception 同级。",
       "type": "object",
@@ -164,6 +177,55 @@
     }
   },
   "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runIndex",
+        "startedAt",
+        "endedAt",
+        "sequenceStart",
+        "sequenceEnd",
+        "logCount",
+        "problemCount",
+        "blockingProblemCount"
+      ],
+      "properties": {
+        "runIndex": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "type": ["string", "null"],
+          "description": "runStarted 边界事件的时间；session 在 Play Mode 进行中启动时该轮没有 runStarted 事件，为 null。"
+        },
+        "endedAt": {
+          "type": ["string", "null"],
+          "description": "runEnded 边界事件的时间；session 结束时该轮仍在运行则为 null。"
+        },
+        "sequenceStart": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "sequenceEnd": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "logCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "该轮的 Unity Console 日志条数（不含 BridgeEvent 边界行）。"
+        },
+        "problemCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blockingProblemCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "problem": {
       "type": "object",
       "additionalProperties": false,

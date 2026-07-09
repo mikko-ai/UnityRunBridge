@@ -227,6 +227,12 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 
 `unity-console.jsonl` 记录 Unity Console 日志，每行一个 JSON 对象；日志的 `sequence` 会持久化到 `SessionState`，跨 domain reload 仍然单调递增。
 
+会话生命周期与 Play Mode 生命周期是解耦的（会话只由 `session/start`/`session/end` 控制），手动进/退 Play Mode 不结束会话——但每一轮 Play Mode 运行的边界会如实落进日志：
+
+- 每条日志带 `runIndex` 字段，标记它属于 session 内第几轮 Play Mode 运行（`0` 表示首轮运行开始前的编辑期日志）。`runIndex` 持久化到 `SessionState`，跨 domain reload 连续。
+- 每轮的起止由 Bridge 写入的 `BridgeEvent` 边界行标出：`runStarted` 在进入 Play 流程开始时（`ExitingEditMode`，domain reload 之前）写入并递增 `runIndex`，让 reload 噪音与 `Awake` 日志归入新一轮；`runEnded` 在退出流程完全结束（`EnteredEditMode`）后写入，保证 `OnDestroy` 日志属于本轮。边界行与普通日志共用同一条 `sequence` 链，不参与问题分类。
+- 一个 session 内 CLI 只触发一轮 play，出现第二轮即说明有人在 Editor 中手动重新进入过 Play Mode：summary 的 `runs` 数组按轮次分组统计（起止时间、sequence 区间、`problemCount`/`blockingProblemCount`），并给出 `manualInterventionDetected: true` 提示 agent 结果可能混入非受控运行。这是"如实记录 + 显式标注"的取舍：桥不阻止手动操作、不丢弃日志，判定交给读 summary 的一方。
+
 `summary.json` 汇总本次运行结果。规则：
 
 - session 处于 `failed`（进程级失败）时，summary 的 `status` 直接是 `failed`，并带上 `failedReason`。
@@ -236,7 +242,7 @@ Python package / uv tool package 名称使用 `unity-run-bridge`，全局命令�
 - `.unity-agent/log-rules.json` 可配置 ignore rules（降噪）与 watch rules（聚焦）；`unityctl errors` 复用与 `summary` 相同的分类逻辑（`classify_log` + `load_log_rules`），口径保持一致。
 - watch rules 命中的日志会在生成 summary 时提取进 `watchedLogs` 字段（带 `line` 行号，最多保留最近 50 条，`watchedCount` 记录全量命中数），不影响问题分类。agent 可以在 `play` 前声明本次运行的关注点，`stop` 后直接从 summary 拿到命中日志。
 
-Play Mode 期间日志量可能很大，而要验证的行为往往发生在运行后期，因此 `unityctl logs` 支持查询侧过滤：`--grep`（message 子串，不区分大小写）、`--type`（日志类型，逗号分隔）、`--after-sequence`（只看某个 sequence 游标之后的增量，利用 sequence 单调递增的特性跳过启动噪音）。过滤只影响查询结果，`unity-console.jsonl` 始终全量落盘。`logs` 与 `errors` 输出的每条日志都带 `line` 字段（在 `unity-console.jsonl` 中的 1-based 行号），便于回到完整日志中查看上下文；`logs` 输出还包含 `totalCount` / `matchedCount`。SKILL.md 中同步给出了推荐的读日志顺序（先 `errors`，再按关键字过滤，不做全量通读）。
+Play Mode 期间日志量可能很大，而要验证的行为往往发生在运行后期，因此 `unityctl logs` 支持查询侧过滤：`--grep`（message 子串，不区分大小写）、`--type`（日志类型，逗号分隔）、`--after-sequence`（只看某个 sequence 游标之后的增量，利用 sequence 单调递增的特性跳过启动噪音）、`--run`（只看第 N 轮 Play Mode 运行的日志）；`BridgeEvent` 边界行默认过滤，`--include-events` 显示。过滤只影响查询结果，`unity-console.jsonl` 始终全量落盘。`logs` 与 `errors` 输出的每条日志都带 `line` 字段（在 `unity-console.jsonl` 中的 1-based 行号），便于回到完整日志中查看上下文；`logs` 输出还包含 `totalCount` / `matchedCount`。SKILL.md 中同步给出了推荐的读日志顺序（先 `errors`，再按关键字过滤，不做全量通读）。
 
 ## 已完成
 

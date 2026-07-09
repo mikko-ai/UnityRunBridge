@@ -379,9 +379,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="读取 session 的 Unity 控制台日志",
         description=(
             "从 session 目录的 unity-console.jsonl 读取 Unity Console 日志，"
-            "按时间顺序返回过滤后最近的 N 条（含 type、message、stackTrace 等字段）。"
+            "按时间顺序返回过滤后最近的 N 条（含 type、message、stackTrace、runIndex 等字段）。"
             "每条日志附带 line 字段（在 unity-console.jsonl 中的 1-based 行号），"
-            "便于回到完整日志中查看上下文。"
+            "便于回到完整日志中查看上下文。runIndex 标记该日志属于第几轮 Play Mode 运行。"
         ),
         formatter_class=_HelpFormatter,
     )
@@ -411,6 +411,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="只返回 sequence 大于 N 的日志（用于跳过已读日志、只看增量）",
     )
+    logs.add_argument(
+        "--run",
+        type=int,
+        metavar="N",
+        help="只返回第 N 轮 Play Mode 运行的日志（runIndex == N；0 表示首轮运行前的编辑期日志）",
+    )
+    logs.add_argument(
+        "--include-events",
+        action="store_true",
+        help="包含 Bridge 写入的运行边界事件行（type=BridgeEvent，默认过滤）",
+    )
 
     errors = subparsers.add_parser(
         "errors",
@@ -428,7 +439,9 @@ def build_parser() -> argparse.ArgumentParser:
             "读取 session 的运行结果汇总。status 取值："
             "passed（无问题）、problem_detected（出现普通 Error 日志，需结合日志判断）、"
             "failed（出现 Exception/Assert 等 blocking problem，或进程级失败，"
-            "原因见 failedReason）。"
+            "原因见 failedReason）。runs 按 Play Mode 轮次分组统计；"
+            "manualInterventionDetected 为 true 表示有人在 Editor 中手动重新进入过 "
+            "Play Mode，结果可能混入非受控运行。"
         ),
         formatter_class=_HelpFormatter,
     )
@@ -1399,6 +1412,10 @@ def cmd_logs(args: argparse.Namespace) -> dict[str, Any]:
     numbered = [{"line": index, **row} for index, row in enumerate(rows, start=1)]
 
     filtered = numbered
+    if not args.include_events:
+        filtered = [row for row in filtered if row.get("type") != "BridgeEvent"]
+    if args.run is not None:
+        filtered = [row for row in filtered if row.get("runIndex") == args.run]
     if args.grep:
         needle = args.grep.lower()
         filtered = [

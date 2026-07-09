@@ -8,6 +8,10 @@ from typing import Any
 PROBLEM_TYPES = {"Error"}
 BLOCKING_TYPES = {"Exception", "Assert"}
 
+# Bridge 写入的 Play Mode 运行边界事件行（runStarted/runEnded），
+# 不是 Unity Console 日志：不参与问题分类、watch 匹配和日志计数。
+BRIDGE_EVENT_TYPE = "BridgeEvent"
+
 # summary.json 中 watchedLogs 保留的最大条数（watchedCount 始终是全量命中数）。
 # watch 规则匹配到高频日志（如每帧心跳）时避免 summary 无限膨胀。
 WATCHED_LOGS_LIMIT = 50
@@ -47,15 +51,35 @@ def build_summary(
     ignored_problem_count = 0
     problem_count = 0
     blocking_problem_count = 0
+    log_count = 0
     last_problem = None
     watch_rules = rule_payload.get("watch", [])
     watched_count = 0
     watched_logs: list[dict[str, Any]] = []
+    runs_by_index: dict[int, dict[str, Any]] = {}
 
     for line, row in enumerate(logs, start=1):
         log_type = str(row.get("type", "Log"))
+        run_index = row.get("runIndex", 0)
+        run = _run_entry(runs_by_index, run_index) if isinstance(run_index, int) and run_index >= 1 else None
+
+        if run is not None:
+            _track_run_sequence(run, row.get("sequence"))
+
+        if log_type == BRIDGE_EVENT_TYPE:
+            if run is not None:
+                event = row.get("event")
+                if event == "runStarted":
+                    run["startedAt"] = row.get("time")
+                elif event == "runEnded":
+                    run["endedAt"] = row.get("time")
+            continue
+
+        log_count += 1
         if log_type in counts:
             counts[log_type] += 1
+        if run is not None:
+            run["logCount"] += 1
 
         if watch_rules and matches_rules(row, watch_rules):
             watched_count += 1
@@ -68,10 +92,20 @@ def build_summary(
         if severity == "problem":
             problem_count += 1
             last_problem = problem_payload(row, "problem")
+            if run is not None:
+                run["problemCount"] += 1
         if severity == "blocking":
             problem_count += 1
             blocking_problem_count += 1
             last_problem = problem_payload(row, "blocking")
+            if run is not None:
+                run["problemCount"] += 1
+                run["blockingProblemCount"] += 1
+
+    runs = [runs_by_index[index] for index in sorted(runs_by_index)]
+    # 一个 session 内 CLI 只会触发一轮 play，出现第二轮即说明有人在 Editor 中
+    # 手动重新进入过 Play Mode——结果可能混入非受控运行，agent 应据此决定是否重跑。
+    manual_intervention_detected = len(runs) > 1
 
     session_status = session_payload.get("status")
     session_failed_reason = session_payload.get("failedReason") if session_status == "failed" else None
@@ -95,7 +129,7 @@ def build_summary(
         "status": status,
         "hasProblems": problem_count > 0,
         "hasBlockingProblems": blocking_problem_count > 0,
-        "logCount": len(logs),
+        "logCount": log_count,
         "warningCount": counts["Warning"],
         "errorCount": counts["Error"],
         "exceptionCount": counts["Exception"],
@@ -109,6 +143,8 @@ def build_summary(
         "endedAt": ended_at,
         "durationMs": duration_ms(started_at, ended_at),
         "failedReason": session_failed_reason,
+        "runs": runs,
+        "manualInterventionDetected": manual_intervention_detected,
     }
 
     if scenario_result:
@@ -125,6 +161,33 @@ def build_summary(
         payload["metrics"] = metrics_section
 
     return payload
+
+
+def _run_entry(runs_by_index: dict[int, dict[str, Any]], run_index: int) -> dict[str, Any]:
+    """runIndex 标记日志发生在第 N 轮 Play Mode 开始之后、第 N+1 轮开始之前（0 表示
+    第一轮开始之前的编辑期日志，不构成 run）。startedAt/endedAt 取自 Bridge 写入的
+    runStarted/runEnded 边界事件行。"""
+    if run_index not in runs_by_index:
+        runs_by_index[run_index] = {
+            "runIndex": run_index,
+            "startedAt": None,
+            "endedAt": None,
+            "sequenceStart": None,
+            "sequenceEnd": None,
+            "logCount": 0,
+            "problemCount": 0,
+            "blockingProblemCount": 0,
+        }
+    return runs_by_index[run_index]
+
+
+def _track_run_sequence(run: dict[str, Any], sequence: Any) -> None:
+    if not isinstance(sequence, int):
+        return
+    if run["sequenceStart"] is None or sequence < run["sequenceStart"]:
+        run["sequenceStart"] = sequence
+    if run["sequenceEnd"] is None or sequence > run["sequenceEnd"]:
+        run["sequenceEnd"] = sequence
 
 
 def _build_metrics_section(session: Path) -> dict[str, Any] | None:
