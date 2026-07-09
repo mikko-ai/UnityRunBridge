@@ -253,9 +253,16 @@ def test_real_assets_install(tmp_path, capsys):
     output = run_skills(project, "init", capsys)
 
     names = [s["name"] for s in output["skills"]]
-    # Task 1 阶段内置资源只有 unityctl；完整双 skill 断言在 Task 3 补强，此处勿提前改严
     assert "unityctl" in names
     skill_md = project / ".agents" / "skills" / "unityctl" / "SKILL.md"
     content = skill_md.read_text(encoding="utf-8")
     assert f"x-unityctl-version: {__version__}" in content
     assert "__UNITYCTL_VERSION__" not in content
+    assert names == ["unityctl", "unityctl-project-skill-creator"]
+    creator_dir = project / ".agents" / "skills" / "unityctl-project-skill-creator"
+    creator_md = (creator_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert "disable-model-invocation: true" in creator_md
+    assert (creator_dir / "flows" / "ui-location.md").exists()
+    assert (
+        project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
+    ).exists()
