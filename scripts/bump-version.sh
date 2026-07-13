@@ -19,6 +19,8 @@ usage() {
   major   递增 major 版本（0.1.0 -> 1.0.0）
   --no-push  仅本地 commit + tag，不 push
 
+执行前会显示当前版本与目标版本，需输入 y 确认后才会继续。
+
 示例：
   scripts/bump-version.sh patch
   scripts/bump-version.sh minor --no-push
@@ -136,7 +138,20 @@ if git -C "$REPO_ROOT" rev-parse "$TAG_NAME" >/dev/null 2>&1; then
   exit 2
 fi
 
+echo ""
 echo "版本升级：${CURRENT_VERSION} -> ${NEW_VERSION} (${BUMP_KIND})"
+echo "将创建 tag：${TAG_NAME}"
+if [[ "$NO_PUSH" == true ]]; then
+  echo "模式：仅本地 commit + tag（不 push）"
+else
+  echo "模式：commit + tag + push 到 origin/main"
+fi
+echo ""
+read -r -p "确认继续？[y/N] " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "已取消。"
+  exit 0
+fi
 
 # 文件同步委托给无副作用的 sync-version.sh（含 uv.lock 与一致性校验）
 bash "$SCRIPT_DIR/sync-version.sh" "$NEW_VERSION"
