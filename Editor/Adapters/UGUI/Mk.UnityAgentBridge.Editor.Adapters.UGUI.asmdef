@@ -1,0 +1,27 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Adapters.UGUI",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Adapters.UGUI",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Core",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "MK_HAS_UGUI"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "MK_HAS_UGUI"
+    }
+  ],
+  "noEngineReferences": false
+}

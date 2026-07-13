@@ -1,0 +1,38 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Adapters.TMP.Tests",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Adapters.TMP.Tests",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Adapters.TMP",
+    "Mk.UnityAgentBridge.Editor.Core",
+    "Unity.TextMeshPro",
+    "UnityEngine.UI"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MK_HAS_TMP",
+    "MK_HAS_UGUI"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.textmeshpro",
+      "expression": "[3.0.0,4.0.0)",
+      "define": "MK_HAS_TMP"
+    },
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "MK_HAS_UGUI"
+    }
+  ],
+  "noEngineReferences": false
+}

@@ -1,0 +1,20 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Adapters.LegacyInput",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Adapters.LegacyInput",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Core"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "ENABLE_LEGACY_INPUT_MANAGER"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
