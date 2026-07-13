@@ -98,27 +98,30 @@ def test_init_project_config_keeps_existing_files_and_only_creates_missing(tmp_p
 
 def test_init_project_config_updates_gitignore_for_all_local_artifacts(tmp_path):
     project = make_unity_project(tmp_path / "Game")
+    root_gitignore = project / ".gitignore"
+    root_gitignore.write_text("Library/\n", encoding="utf-8")
 
     init_project_config(project_path=project)
 
-    ignored = (project / ".gitignore").read_text(encoding="utf-8")
-    assert ".unity-agent/config.local.json" in ignored
-    assert ".unity-agent/sessions/" in ignored
-    assert ".unity-agent/bridge.json" in ignored
-    assert ".unity-agent/scratch/" in ignored
-    assert ".unity-agent/builds/" in ignored
+    ignored = (project / ".unity-agent" / ".gitignore").read_text(encoding="utf-8")
+    assert "config.local.json" in ignored
+    assert "sessions/" in ignored
+    assert "bridge.json" in ignored
+    assert "scratch/" in ignored
+    assert "builds/" in ignored
+    assert root_gitignore.read_text(encoding="utf-8") == "Library/\n"
 
 
 def test_append_gitignore_entry_adds_missing_line_once(tmp_path):
     gitignore = tmp_path / ".gitignore"
     gitignore.write_text("Library/\n", encoding="utf-8")
 
-    append_gitignore_entry(gitignore, ".unity-agent/config.local.json")
-    append_gitignore_entry(gitignore, ".unity-agent/config.local.json")
+    append_gitignore_entry(gitignore, "config.local.json")
+    append_gitignore_entry(gitignore, "config.local.json")
 
     assert gitignore.read_text(encoding="utf-8").splitlines() == [
         "Library/",
-        ".unity-agent/config.local.json",
+        "config.local.json",
     ]
 
 

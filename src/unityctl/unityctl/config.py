@@ -193,21 +193,21 @@ def init_project_config(
 
     copy_bundled_schemas(agent_dir / SCHEMAS_DIRNAME)
 
-    gitignore_path = project / ".gitignore"
+    gitignore_path = agent_dir / ".gitignore"
     updated_local_ignore = append_gitignore_entry(
-        gitignore_path, f".unity-agent/{LOCAL_CONFIG_FILENAME}"
+        gitignore_path, LOCAL_CONFIG_FILENAME
     )
     updated_sessions_ignore = append_gitignore_entry(
-        gitignore_path, f".unity-agent/{SESSIONS_DIRNAME}/"
+        gitignore_path, f"{SESSIONS_DIRNAME}/"
     )
     updated_bridge_ignore = append_gitignore_entry(
-        gitignore_path, f".unity-agent/{BRIDGE_INFO_FILENAME}"
+        gitignore_path, BRIDGE_INFO_FILENAME
     )
     updated_scratch_ignore = append_gitignore_entry(
-        gitignore_path, f".unity-agent/{SCRATCH_DIRNAME}/"
+        gitignore_path, f"{SCRATCH_DIRNAME}/"
     )
     updated_builds_ignore = append_gitignore_entry(
-        gitignore_path, f".unity-agent/{BUILDS_DIRNAME}/"
+        gitignore_path, f"{BUILDS_DIRNAME}/"
     )
 
     effective = resolve_effective_config(project_path=project)
