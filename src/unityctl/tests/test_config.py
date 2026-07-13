@@ -215,6 +215,38 @@ def test_validate_project_config_reports_invalid_port(tmp_path):
     assert any(issue.field == "config.bridge.preferredPort" for issue in result.errors)
 
 
+def test_validate_project_config_warns_when_agent_gitignore_missing_local_config(
+    tmp_path,
+):
+    project = make_unity_project(tmp_path / "Game")
+    unity = tmp_path / "Unity"
+    unity.write_text("", encoding="utf-8")
+    init_project_config(project_path=project, unity_path=unity)
+    (project / ".unity-agent" / ".gitignore").write_text("sessions/\n", encoding="utf-8")
+
+    result = validate_project_config(project)
+
+    assert result.ok is True
+    assert any(
+        issue.field == "gitignore" and "config.local.json" in issue.message
+        for issue in result.warnings
+    )
+
+
+def test_validate_project_config_does_not_warn_when_agent_gitignore_has_local_config(
+    tmp_path,
+):
+    project = make_unity_project(tmp_path / "Game")
+    unity = tmp_path / "Unity"
+    unity.write_text("", encoding="utf-8")
+    init_project_config(project_path=project, unity_path=unity)
+
+    result = validate_project_config(project)
+
+    assert result.ok is True
+    assert all(issue.field != "gitignore" for issue in result.warnings)
+
+
 def test_find_latest_session_path_uses_session_directory_name(tmp_path):
     project = make_unity_project(tmp_path / "Game")
     old_session = project / ".unity-agent" / "sessions" / "2026-07-01_100000_old"

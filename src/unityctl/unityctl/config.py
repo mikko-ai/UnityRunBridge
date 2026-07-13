@@ -384,9 +384,9 @@ def validate_project_config(project_path: str | Path) -> ValidationResult:
             )
         )
 
-    gitignore = project / ".gitignore"
+    gitignore = project / ".unity-agent" / ".gitignore"
     ignored = gitignore.read_text(encoding="utf-8").splitlines() if gitignore.exists() else []
-    if f".unity-agent/{LOCAL_CONFIG_FILENAME}" not in ignored:
+    if LOCAL_CONFIG_FILENAME not in ignored:
         warnings.append(
             ValidationIssue(
                 "gitignore",
