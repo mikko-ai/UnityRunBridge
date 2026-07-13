@@ -179,7 +179,7 @@ unityctl init
 - 脚本或 CI 中可以使用 `unityctl init --yes` 跳过确认。
 - 只补缺失的 `config.json` / `config.local.json`，不覆盖已有文件。
 - 把内置 schema 复制/刷新到 `.unity-agent/schemas/`（schema 是机器生成物，总是覆盖）。
-- 补 `.gitignore` 中缺失的 `.unity-agent/config.local.json`、`.unity-agent/sessions/`、`.unity-agent/bridge.json`、`.unity-agent/scratch/`、`.unity-agent/builds/`。
+- 补 `.unity-agent/.gitignore` 中缺失的 `config.local.json`、`sessions/`、`bridge.json`、`scratch/`、`builds/`（不改动项目根 `.gitignore`）。
 - 初始化完成后提示用户编辑 local 配置并运行 `unityctl config validate`。
 
 已初始化项目再次执行 `init` 时，不会重写用户手改过的 `config.json` / `config.local.json`。
@@ -305,17 +305,17 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 .unity-agent/log-rules.json
 ```
 
-建议忽略：
+建议忽略（由 `.unity-agent/.gitignore` 管理，相对该目录）：
 
 ```text
-.unity-agent/config.local.json
-.unity-agent/sessions/
-.unity-agent/bridge.json
-.unity-agent/scratch/
-.unity-agent/builds/
+config.local.json
+sessions/
+bridge.json
+scratch/
+builds/
 ```
 
-（`init` 会自动把这几条补进 Unity 项目的 `.gitignore`，缺失才补，不会重复添加或删除用户自定义内容。）
+（`init` 会自动把这几条补进 `.unity-agent/.gitignore`，缺失才补，不会重复添加或删除用户自定义内容；不修改项目根 `.gitignore`。）
 
 本仓库自身保留：
 

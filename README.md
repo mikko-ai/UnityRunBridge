@@ -152,9 +152,10 @@ unityctl init
 .unity-agent/config.json
 .unity-agent/config.local.json
 .unity-agent/schemas/*.json
+.unity-agent/.gitignore
 ```
 
-如果已经初始化，`init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，应被 `.gitignore` 忽略。
+如果已经初始化，`init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，由 `.unity-agent/.gitignore` 忽略（`init` 会维护该文件，缺失才补）。
 
 `init` 还会检测 `Packages/manifest.json` 是否已包含 `com.mk.unity-agent-bridge` 依赖：
 
