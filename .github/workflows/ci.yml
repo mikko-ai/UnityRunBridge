@@ -14,6 +14,12 @@ on:
         required: false
         default: 'pr'
 
+# 同一 ref 上的旧 push/PR 运行会被新运行自动取消，避免连续推送在唯一的
+# self-hosted runner 上排队堆积；schedule/workflow_dispatch 不取消，保证跑完。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+
 # 禁止任何 job 静默跳过 Unity 测试；runner 固定为预激活 self-hosted，无 hosted fallback。
 env:
   UNITY_BIN: /Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity

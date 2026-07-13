@@ -8,6 +8,12 @@ on:
 permissions:
   contents: write
 
+# 按 tag 分组排队，避免重复推送同一 tag（如 -f 强制改 tag 后重推）时
+# 出现并发的发布流程互相争抢同一台 self-hosted runner；发布过程不允许被取消。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   UNITY_BIN: /Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity
   UNITY_FIXTURE_ROOT: ${{ github.workspace }}/.tmp/unity-fixtures
