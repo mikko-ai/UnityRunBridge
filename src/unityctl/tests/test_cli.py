@@ -774,7 +774,9 @@ def test_init_command_writes_project_and_local_config(tmp_path, capsys):
     assert output["alreadyInitialized"] is False
     assert (project / ".unity-agent" / "config.json").exists()
     assert (project / ".unity-agent" / "config.local.json").exists()
-    assert ".unity-agent/config.local.json" in (project / ".gitignore").read_text()
+    assert "config.local.json" in (
+        project / ".unity-agent" / ".gitignore"
+    ).read_text()
 
 
 def test_init_yes_skips_package_install_without_flag(tmp_path, capsys):
