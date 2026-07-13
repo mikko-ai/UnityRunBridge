@@ -8,9 +8,19 @@ on:
 permissions:
   contents: write
 
+env:
+  UNITY_BIN: /Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity
+  UNITY_FIXTURE_ROOT: ${{ github.workspace }}/.tmp/unity-fixtures
+  UNITY_MATRIX_RESULTS: ${{ github.workspace }}/.tmp/test-results/matrix
+  UNITY_MATRIX_LOGS: ${{ github.workspace }}/.tmp/logs/matrix
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  validate:
+    name: Validate release tag
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,13 +31,92 @@ jobs:
         id: version
         run: bash .github/scripts/validate-release.sh
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+  python:
+    name: Python tests
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 20
+    needs: [validate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache uv
+        uses: actions/cache@v4
         with:
-          enable-cache: true
+          path: |
+            ~/.cache/uv
+            src/unityctl/.venv
+          key: uv-${{ runner.os }}-${{ hashFiles('src/unityctl/uv.lock', 'src/unityctl/pyproject.toml') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Run Python tests
         run: bash scripts/run-python-tests.sh
+
+  unity-matrix-full:
+    name: Unity matrix (full)
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 240
+    needs: [validate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Unity fixture Library
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tmp/unity-fixtures/**/Library
+            .tmp/unity-fixtures/**/Packages/packages-lock.json
+          key: unity-fixture-${{ runner.os }}-2022.3.62f2-full-${{ hashFiles('packages/com.mk.unity-agent-bridge/**/*.asmdef', 'packages/com.mk.unity-agent-bridge/package.json', 'scripts/create-unity-test-fixture.sh') }}
+          restore-keys: |
+            unity-fixture-${{ runner.os }}-2022.3.62f2-full-
+            unity-fixture-${{ runner.os }}-2022.3.62f2-
+
+      - name: Verify UNITY_BIN
+        run: |
+          if [[ ! -x "$UNITY_BIN" ]]; then
+            echo "UNITY_BIN 不可执行：$UNITY_BIN"
+            echo "Release 禁止静默跳过 Unity tests；禁止 fallback 到 hosted runner。"
+            exit 1
+          fi
+
+      - name: Run full Unity matrix
+        run: bash scripts/run-unity-matrix.sh --set full
+
+      - name: Extract first C# compile error
+        if: failure()
+        run: bash .github/scripts/extract-unity-first-error.sh "$UNITY_MATRIX_LOGS"
+
+      - name: Upload Unity XML results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-unity-matrix-xml-${{ github.run_id }}
+          path: .tmp/test-results/matrix/*.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Unity logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-unity-matrix-logs-${{ github.run_id }}
+          path: .tmp/logs/matrix/*.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Publish release
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 30
+    # 必须显式等待 full matrix 成功；不得在 Unity tests 失败或跳过时发布。
+    needs: [validate, python, unity-matrix-full]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure git
         run: |
@@ -38,19 +127,21 @@ jobs:
         run: |
           git subtree split --prefix=packages/com.mk.unity-agent-bridge -b upm-split
           git push origin upm-split:upm --force
-          git tag -f "upm/v${{ steps.version.outputs.version }}" upm-split
-          git push origin "upm/v${{ steps.version.outputs.version }}" --force
+          git tag -f "upm/v${{ needs.validate.outputs.version }}" upm-split
+          git push origin "upm/v${{ needs.validate.outputs.version }}" --force
 
       - name: Package UPM tarball
         id: package
         run: |
-          # 脚本 stdout 包含进度信息，产物路径在最后一行
           ARCHIVE_PATH="$(bash scripts/package-upm.sh | tail -n 1)"
-          if [ ! -f "$ARCHIVE_PATH" ]; then
+          if [[ ! -f "$ARCHIVE_PATH" ]]; then
             echo "打包产物不存在：$ARCHIVE_PATH"
             exit 1
           fi
           echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify schemas and tarball contents
+        run: bash .github/scripts/verify-upm-package.sh "${{ steps.package.outputs.archive_path }}"
 
       - name: Build Python wheel and sdist
         id: python

@@ -10,10 +10,10 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 打开 Unity 项目中的场景。
 - 触发脚本重编译并等待结果（`unityctl refresh`）。
 - 诊断本机环境与 Bridge 连通性（`unityctl doctor`）。
-- 只读查询 UGUI Hierarchy 结构（`unityctl hierarchy`）与 Play Mode 截图（`unityctl snapshot`）。
-- 模拟 UGUI 点击 / 输入 / 设值（`click` / `input` / `set-value`），带射线遮挡验证。
+- 只读查询场景 Hierarchy 结构（`unityctl hierarchy`）与 Play Mode 截图（`unityctl snapshot`）。
+- 在安装 UGUI 时模拟点击 / 输入 / 设值（`click` / `input` / `set-value`），带射线遮挡验证。
 - 零侵入调用游戏侧暴露的命令（`unityctl gameplay`，默认关闭）。
-- 录制 UGUI 语义动作为 `actions.jsonl`（`unityctl record`），供复盘或生成 scenario 草稿。
+- 录制 UGUI 语义动作为 `actions.jsonl`（`unityctl record`，需 UGUI），供复盘或生成 scenario 草稿。
 - 用 JSON 文件固化「操作 → 断言」的自动化验证脚本并可重复执行（`unityctl scenario`）。
 - `ProfilerRecorder` 逐帧性能采样，用于改动前后的相对回归比较（`unityctl profile`）。
 - 独立进程执行 Player 构建并生成结构化报告（`unityctl build`）。
@@ -58,6 +58,23 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 ```
 
 请使用本仓库在你机器上的绝对路径。
+
+### 可选依赖与 Capability 差异（0.3.0+）
+
+`com.mk.unity-agent-bridge` **不再**在 `package.json` 中强依赖 `com.unity.ugui` / TMP / Input System。需要的包由**项目** `Packages/manifest.json` 自行声明；缺包时对应 Adapter 程序集不参与编译，Bridge 仍可启动，但部分 capability 不会声明。
+
+| 安装组合 | 典型可选依赖 | 路由 / capability | 说明 |
+|----------|--------------|-------------------|------|
+| Core-only（NoUGUI） | 无 | **24 / 7** | 无 `interaction`、`recording`；`hierarchy`/`capture`/`profiling`/`health` 等仍可用 |
+| UGUI + Legacy Input | `com.unity.ugui` | **30 / 9** | 含 `interaction`、`recording`；指针走 Legacy Input Manager |
+| UGUI + Input System | `ugui` + `com.unity.inputsystem` | **30 / 9** | Player Settings 中 Active Input Handling 设为 Input System Package 或 Both |
+| UGUI + Both | 同上 + Legacy 仍启用 | **30 / 9** | 两套指针后端并存时 Input System 优先（Priority 更高） |
+| UGUI + TMP | `ugui` + `com.unity.textmeshpro` | **30 / 9** | TMP 文本 / `TMP_InputField` / `TMP_Dropdown` 富化；需导入 TMP Essential Resources |
+| Full | `ugui` + TMP + Input System | **30 / 9** | 仓库测试矩阵的完整组合 |
+
+- 缺 UGUI 时执行 `click` / `input` / `set-value` / `record`，CLI 返回 `bridge_capability_missing`（不是笼统 404）。
+- 示例 manifest：[`examples/unity-project-manifest/`](examples/unity-project-manifest/)（`core-only.json`、`ugui-legacy.json`、`ugui-inputsystem.json`、`ugui-tmp.json`、`full.json`）。
+- 包内破坏性变化仅限**内部程序集拆分**；对外 HTTP 路径、信封与错误码保持兼容。详见包内 [`CHANGELOG.md`](packages/com.mk.unity-agent-bridge/CHANGELOG.md)。
 
 ## 安装 CLI
 
@@ -116,11 +133,11 @@ uv run unityctl --help
 | `refresh` | 触发脚本重编译并等待完成 |
 | `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
 | `doctor` | 诊断项目配置与 Bridge 连通性 |
-| `hierarchy roots/tree/find/ancestors/inspect` | 只读查询 UGUI Hierarchy 结构 |
+| `hierarchy roots/tree/find/ancestors/inspect` | 只读查询场景 Hierarchy 结构 |
 | `snapshot` | Play Mode 截图（落盘 PNG） |
-| `click` / `input` / `set-value` | 模拟 UGUI 点击 / 输入 / 设值（需 Play Mode） |
+| `click` / `input` / `set-value` | 模拟 UGUI 点击 / 输入 / 设值（需 Play Mode，且项目已安装 UGUI） |
 | `gameplay list` / `gameplay invoke` | 零侵入调用游戏侧暴露的命令（默认关闭） |
-| `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl` |
+| `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl`（需 UGUI） |
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
@@ -312,7 +329,7 @@ unityctl snapshot --reason assert_failure                # 需 Play Mode，截�
 
 节点用 `path`（`/` 分隔）或 `instanceId` 定位；`snapshot` 受 `config.json` 里 `capture.screenshot` 配置管控（开关、配额、是否允许 agent 主动请求）。
 
-## 模拟 UI 操作 / Gameplay 命令桥（需 Play Mode）
+## 模拟 UI 操作 / Gameplay 命令桥（需 Play Mode；UI 操作还需 UGUI）
 
 ```bash
 unityctl click MainCanvas/ShopWindow/BuyButton           # 默认对目标做射线遮挡验证
@@ -323,7 +340,7 @@ unityctl gameplay list                                   # 查看可调用命令
 unityctl gameplay invoke CheatManager.AddGold --args '{"amount": 100}'
 ```
 
-`click`/`input`/`set-value` 直接派发 Unity 事件系统事件链，不是修改内部状态。`gameplay` 是零侵入调用游戏代码的通道（duck-typed attribute 或白名单），**默认关闭**，需在 `config.json` 显式开启且应只在测试/开发环境使用。
+`click`/`input`/`set-value` 直接派发 Unity 事件系统事件链，不是修改内部状态；项目未安装 `com.unity.ugui` 时 Bridge 不声明 `interaction`，CLI 返回 `bridge_capability_missing`。`gameplay` 是零侵入调用游戏代码的通道（duck-typed attribute 或白名单），**默认关闭**，需在 `config.json` 显式开启且应只在测试/开发环境使用。
 
 ## 录制与自动化验证脚本（Scenario）
 
@@ -418,7 +435,13 @@ schemas/build-report.schema.json     # unityctl build 产出的 build-report.jso
 `examples/` 提供最小可读样例：
 
 ```text
-examples/unity-project-manifest/manifest.json
+examples/unity-project-manifest/README.md
+examples/unity-project-manifest/core-only.json
+examples/unity-project-manifest/ugui-legacy.json
+examples/unity-project-manifest/ugui-inputsystem.json
+examples/unity-project-manifest/ugui-tmp.json
+examples/unity-project-manifest/full.json
+examples/unity-project-manifest/manifest.json          # 与 full.json 同内容的别名
 examples/log-rules.json
 examples/sessions/session.json
 examples/sessions/unity-console.jsonl
@@ -460,7 +483,14 @@ mkdir -p "$REPO_ROOT/.tmp/logs" "$REPO_ROOT/.tmp/test-results"
 
 Unity 测试命令**故意不传** `-quit` 参数；Unity 在测试运行写入结果 XML 后会自动退出。
 
-也可以使用脚本运行。未设置 `UNITY_PROJECT` 时，脚本会使用仓库内
+也可以使用矩阵脚本按 fixture 跑 EditMode 测试（PR 集 4 组 / Full 集 9 组：NoUGUI/UGUI/UGUI+TMP × Legacy/InputSystem/Both）：
+
+```bash
+export UNITY_BIN="/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity"
+bash scripts/run-unity-matrix.sh --set full
+```
+
+未设置 `UNITY_PROJECT` 时，单次 EditMode 脚本会使用仓库内
 `.tmp/unity-test-project` 作为临时 Unity project：
 
 ```bash

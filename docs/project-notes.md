@@ -123,6 +123,25 @@ Unity 的 Play Mode 进入/退出、脚本重编译都是异步的。`play`、`s
 - **Build 诊断**（`Editor/Build/` + `build.py`）：故意做成完全独立于 Bridge 的第二进程（`-executeMethod` batchmode 构建），因为 Unity 一次只能有一个进程持有项目的 `Library`/`Temp` 锁——构建必须是"另一个 Unity 实例"，不能复用正在跑的交互式 Editor。CLI 侧兜底解析 `build.log` 里的编译错误，覆盖"报告都没生成"的失败模式（脚本编译错误会导致 `-executeMethod` 从未真正执行）。
 - **项目健康检查**（`Editor/Health/` + `health.py`）：`doctor` 回答"环境能不能跑"，`health` 回答"项目干不干净"，两者定位不同不合并。检查项设计成互相独立、可单独跑、Bridge 不可达时优雅降级为 `skipped` 而不是让整体检查失败——这样静态检查（`build_scenes`/`packages`）永远可用，不必先启动 Editor。
 
+### 0.3.0：可选依赖与程序集边界
+
+垂直能力落地后，把单体 Editor 程序集拆成可按项目依赖裁剪的模块，避免无 UGUI 的项目也被强行拉入 UI 包：
+
+- **Core**：契约、实例级 Route/Capability runtime、JSON、Jobs、Hierarchy 核心扫描；禁止引用 UGUI/TMP/Input System。
+- **Host**：唯一 `[InitializeOnLoad]` composition root；事务装配 Adapter → Module，失败回滚。
+- **Features**：各 capability Module（含 Interaction/Recording 的 `IsAvailable` 门控）。
+- **Build**：独立 batchmode 构建入口。
+- **Adapters**：UGUI / TMP / LegacyInput / Input System 按 `versionDefines` + `defineConstraints` 条件编译。
+
+Capability 裁剪规则（对外契约）：
+
+| 场景 | routes | capabilities | 缺省能力 |
+|------|--------|--------------|----------|
+| 完整安装（含 UGUI） | 30 | 9 | — |
+| Core-only / NoUGUI | 24 | 7 | 无 `interaction`、`recording` |
+
+项目侧在 `Packages/manifest.json` 按需加入 `com.unity.ugui` / TMP / Input System；示例见 `examples/unity-project-manifest/`。CLI 对缺失 capability 统一报 `bridge_capability_missing`。
+
 ## 配置设计
 
 UnityRunBridge 使用项目本地 `.unity-agent/` 目录保存配置和运行产物。
@@ -275,6 +294,7 @@ Play Mode 期间日志量可能很大，而要验证的行为往往发生在运�
 - Phase 2 操作与执行：射线遮挡验证的 `click`/`input`/`set-value`（真实派发 Unity 事件系统事件链）；零侵入 gameplay 命令桥（duck-typed attribute + 白名单双通道，默认关闭，带审计日志）；UGUI 语义动作录制（`unityctl record`，产出 `actions.jsonl`）。
 - Phase 3 可复跑验证脚本：`unityctl scenario`（`validate`/`run`/`from-recording`），CLI 侧断言引擎覆盖 `ui`/`log`/`gameplay`/`metric` 四类条件源，结果并入 session `summary.json`。
 - Phase 4 量化与诊断：`ProfilerRecorder` 逐帧性能采样（`unityctl profile`，60 帧批量落盘、`avg`/`max`/`p95` 汇总）；独立 batchmode 进程的 Player 构建诊断（`unityctl build`，`build-report.json` + 编译错误日志兜底解析）；项目健康检查（`unityctl health`：`compilation`/`missing_scripts`/`build_scenes`/`packages`，Bridge 不可达时优雅降级为 `skipped`）。
+- **0.3.0 模块化拆分**：Editor 包拆为八个生产程序集（Core / Host / Features / Build + UGUI / TMP / LegacyInput / InputSystem Adapter）；`package.json` 不再强依赖 UGUI；完整安装 **30 路由 / 9 capability**，NoUGUI **24 / 7**（无 `interaction`/`recording`）。内部 asmdef 边界为破坏性变化；对外 HTTP 协议与 CLI 命令面保持兼容（见包内 `CHANGELOG.md`）。
 
 ## 还没有做
 
@@ -326,8 +346,8 @@ builds/
 
 ## 后续建议
 
-基础运行控制/观测链路已经过真实项目验证，垂直能力扩展（Phase 0-4）在仓库自带的临时测试项目上跑过完整 Python + Unity EditMode 测试，但还没有过真实业务项目的实战检验。下一步比较自然的是：
+基础运行控制/观测链路与垂直能力扩展已在仓库 fixture 矩阵（NoUGUI / UGUI / UGUI+TMP × Legacy / Input System / Both）上验证。下一步比较自然的是：
 
-1. 在真实 Unity project 中添加 UPM package（`com.mk.unity-agent-bridge`），跑一遍基础链路：`init` → `config validate` → `start`/`status` → `play --session <name>` → `stop --latest` → `summary --latest` → 故意改一段编译报错代码验证 `refresh`。
-2. 在同一个真实项目里试跑垂直能力：`hierarchy find` 看真实 UGUI 结构是否符合预期、`click`/`input` 走一遍真实登录/交互流程、录一段 `record` 并用 `scenario from-recording` 生成草稿补上断言、跑一次 `unityctl health` 看真实项目会报出哪些 `missing_scripts`/`packages` 问题。
+1. 在真实 Unity project 中添加 UPM package（`com.mk.unity-agent-bridge`），按需声明可选依赖（见 `examples/unity-project-manifest/`），跑一遍基础链路：`init` → `config validate` → `start`/`status` → `play --session <name>` → `stop --latest` → `summary --latest` → 故意改一段编译报错代码验证 `refresh`。
+2. 在同一个真实项目里试跑垂直能力：`hierarchy find` 看真实结构是否符合预期、有 UGUI 时 `click`/`input` 走一遍真实登录/交互流程、录一段 `record` 并用 `scenario from-recording` 生成草稿补上断言、跑一次 `unityctl health` 看真实项目会报出哪些 `missing_scripts`/`packages` 问题。
 3. 用真实项目的反馈决定下一步优先级：是补安装体验、做 MCP adapter，还是继续加固 scenario 的表达能力（变量/条件分支）。

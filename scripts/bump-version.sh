@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PACKAGE_JSON="$REPO_ROOT/packages/com.mk.unity-agent-bridge/package.json"
-BRIDGE_CONFIG="$REPO_ROOT/packages/com.mk.unity-agent-bridge/Editor/BridgeConfig.cs"
+BRIDGE_CONFIG="$REPO_ROOT/packages/com.mk.unity-agent-bridge/Editor/Core/BridgeConfig.cs"
 PYPROJECT="$REPO_ROOT/src/unityctl/pyproject.toml"
 INIT_PY="$REPO_ROOT/src/unityctl/unityctl/__init__.py"
 UNITYCTL_DIR="$REPO_ROOT/src/unityctl"
@@ -138,117 +138,8 @@ fi
 
 echo "版本升级：${CURRENT_VERSION} -> ${NEW_VERSION} (${BUMP_KIND})"
 
-python3 - "$NEW_VERSION" "$PACKAGE_JSON" "$BRIDGE_CONFIG" "$PYPROJECT" "$INIT_PY" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-new_version = sys.argv[1]
-paths = {
-    "package.json": Path(sys.argv[2]),
-    "BridgeConfig.cs": Path(sys.argv[3]),
-    "pyproject.toml": Path(sys.argv[4]),
-    "__init__.py": Path(sys.argv[5]),
-}
-
-package_payload = json.loads(paths["package.json"].read_text(encoding="utf-8"))
-package_payload["version"] = new_version
-paths["package.json"].write_text(
-    json.dumps(package_payload, ensure_ascii=False, indent=2) + "\n",
-    encoding="utf-8",
-)
-
-bridge_config = paths["BridgeConfig.cs"].read_text(encoding="utf-8")
-bridge_config, count = re.subn(
-    r'public const string Version = "[^"]+";',
-    f'public const string Version = "{new_version}";',
-    bridge_config,
-    count=1,
-)
-if count != 1:
-    raise SystemExit("未能更新 BridgeConfig.cs 中的 Version 常量")
-paths["BridgeConfig.cs"].write_text(bridge_config, encoding="utf-8")
-
-pyproject = paths["pyproject.toml"].read_text(encoding="utf-8")
-pyproject, count = re.subn(
-    r'^version = "[^"]+"$',
-    f'version = "{new_version}"',
-    pyproject,
-    count=1,
-    flags=re.MULTILINE,
-)
-if count != 1:
-    raise SystemExit("未能更新 pyproject.toml 中的 version")
-paths["pyproject.toml"].write_text(pyproject, encoding="utf-8")
-
-init_py = paths["__init__.py"].read_text(encoding="utf-8")
-init_py, count = re.subn(
-    r'^__version__ = "[^"]+"$',
-    f'__version__ = "{new_version}"',
-    init_py,
-    count=1,
-    flags=re.MULTILINE,
-)
-if count != 1:
-    raise SystemExit("未能更新 __init__.py 中的 __version__")
-paths["__init__.py"].write_text(init_py, encoding="utf-8")
-PY
-
-echo "更新 uv.lock..."
-(
-  cd "$UNITYCTL_DIR"
-  uv lock
-)
-
-echo "校验版本一致性..."
-python3 - "$NEW_VERSION" "$PACKAGE_JSON" "$BRIDGE_CONFIG" "$PYPROJECT" "$INIT_PY" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-expected = sys.argv[1]
-package_json = Path(sys.argv[2])
-bridge_config = Path(sys.argv[3])
-pyproject = Path(sys.argv[4])
-init_py = Path(sys.argv[5])
-
-package_version = json.loads(package_json.read_text(encoding="utf-8"))["version"]
-bridge_match = re.search(
-    r'public const string Version = "([^"]+)";',
-    bridge_config.read_text(encoding="utf-8"),
-)
-pyproject_match = re.search(
-    r'^version = "([^"]+)"$',
-    pyproject.read_text(encoding="utf-8"),
-    flags=re.MULTILINE,
-)
-init_match = re.search(
-    r'^__version__ = "([^"]+)"$',
-    init_py.read_text(encoding="utf-8"),
-    flags=re.MULTILINE,
-)
-
-if bridge_match is None or pyproject_match is None or init_match is None:
-    raise SystemExit("版本校验失败：未能读取某个版本字段")
-
-versions = {
-    "package.json": package_version,
-    "BridgeConfig.cs": bridge_match.group(1),
-    "pyproject.toml": pyproject_match.group(1),
-    "__init__.py": init_match.group(1),
-}
-
-mismatch = {name: value for name, value in versions.items() if value != expected}
-if mismatch:
-    print("版本不一致：")
-    for name, value in mismatch.items():
-        print(f"  {name}: {value} (expected {expected})")
-    raise SystemExit(1)
-
-print(f"版本一致：{expected}")
-PY
+# 文件同步委托给无副作用的 sync-version.sh（含 uv.lock 与一致性校验）
+bash "$SCRIPT_DIR/sync-version.sh" "$NEW_VERSION"
 
 git -C "$REPO_ROOT" add \
   "$PACKAGE_JSON" \

@@ -1994,7 +1994,7 @@ def _require_capability(client: BridgeClient, capability: str) -> None:
     if capability not in capabilities:
         raise CliError(
             "bridge_capability_missing",
-            f"bridge 版本过旧，缺少 {capability} 能力，请升级 UPM 包",
+            f"缺少 {capability} 能力，请检查可选依赖（如 com.unity.ugui）或 Bridge 版本",
         )
 
 

@@ -1,0 +1,21 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Tests.Core",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Tests.Core",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Core"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

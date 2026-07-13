@@ -1496,6 +1496,18 @@ def test_require_capability_raises_when_missing():
         cli._require_capability(client, "hierarchy")
     assert exc.value.code == "bridge_capability_missing"
     assert "hierarchy" in str(exc.value)
+    assert "可选依赖" in str(exc.value) or "Bridge 版本" in str(exc.value)
+
+
+def test_require_capability_missing_mentions_optional_deps_not_just_upgrade():
+    client = _FakeCapabilitiesClient(["core"])
+    with pytest.raises(cli.CliError) as exc:
+        cli._require_capability(client, "interaction")
+    assert exc.value.code == "bridge_capability_missing"
+    message = str(exc.value)
+    assert "interaction" in message
+    assert "可选依赖" in message
+    assert "版本过旧" not in message
 
 
 def test_snapshot_dispatches_and_waits_for_job(monkeypatch, tmp_path, capsys):
@@ -1613,6 +1625,72 @@ def test_click_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
     output = json.loads(capsys.readouterr().err)
     assert output["ok"] is False
     assert output["code"] == "bridge_capability_missing"
+
+
+# NoUGUI Bridge 运行时 capability 快照（与 RouteContractTests.NoUguiCapabilities 对齐）。
+_NOUGUI_CAPABILITIES = [
+    "capture",
+    "core",
+    "gameplay",
+    "health",
+    "hierarchy",
+    "jobs",
+    "profiling",
+]
+
+
+def _patch_nougui_capabilities(monkeypatch):
+    def nougui_capabilities(self):
+        self.calls.append(("capabilities", None))
+        return {"ok": True, "capabilities": list(_NOUGUI_CAPABILITIES)}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", nougui_capabilities)
+
+
+def test_nougui_click_returns_bridge_capability_missing_not_404(monkeypatch, tmp_path, capsys):
+    """NoUGUI 场景：interaction 未注册时 CLI 在请求前拦截，不得以裸 404/not_found 失败。"""
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    _patch_nougui_capabilities(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "click", "MainCanvas/StartButton"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+    assert output["code"] != "not_found"
+    assert "404" not in output.get("message", "")
+    assert "可选依赖" in output["message"] or "Bridge 版本" in output["message"]
+    assert not any(path == "interaction/click" for path, _ in clients[0].calls)
+
+
+def test_nougui_record_returns_bridge_capability_missing_not_404(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    _patch_nougui_capabilities(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "record", "status"])
+
+    assert exit_code == 1
+    output = json.loads(capsys.readouterr().err)
+    assert output["ok"] is False
+    assert output["code"] == "bridge_capability_missing"
+    assert not any(path == "recording/status" for path, _ in clients[0].calls)
+
+
+def test_nougui_hierarchy_still_available(monkeypatch, tmp_path, capsys):
+    """NoUGUI 仍提供 hierarchy；capture/health 隐含依赖 jobs 协议不变。"""
+    clients, _, _, _ = patch_bridge(monkeypatch)
+    _patch_nougui_capabilities(monkeypatch)
+
+    exit_code = cli.main(["--project", str(tmp_path), "hierarchy", "roots"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert ("hierarchy/roots", None) in clients[0].calls
+    assert "jobs" in _NOUGUI_CAPABILITIES
+    assert "capture" in _NOUGUI_CAPABILITIES
+    assert "health" in _NOUGUI_CAPABILITIES
 
 
 def test_input_dispatches_text_and_submit(monkeypatch, tmp_path, capsys):

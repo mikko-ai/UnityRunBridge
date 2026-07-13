@@ -59,11 +59,11 @@ unityctl config validate    # 确认配置无误后再 start
 | 能力 | 命令 | reference |
 |---|---|---|
 | 日志查询与排错、log-rules 降噪/聚焦 | `logs` / `errors` | `references/logs.md` |
-| 场景 Hierarchy 结构化查询（只读） | `hierarchy` | `references/hierarchy.md` |
-| UI 操作、截图、动作录制 | `click` / `input` / `set-value` / `snapshot` / `record` | `references/interaction.md` |
+| 场景 Hierarchy 结构化查询（只读；Core，不依赖 UGUI） | `hierarchy` | `references/hierarchy.md` |
+| UI 操作、截图、动作录制（UI/录制需 UGUI） | `click` / `input` / `set-value` / `snapshot` / `record` | `references/interaction.md` |
 | 零侵入调用游戏逻辑 | `gameplay` | `references/gameplay.md` |
 | 可复跑验证脚本 | `scenario` | `references/scenario.md` |
-| 性能采样 / Player 构建 / 健康检查 | `profile` / `build` / `health` | `references/profiling-build-health.md` |
+| 性能采样 / Player 构建 / 健康检查（Core） | `profile` / `build` / `health` | `references/profiling-build-health.md` |
 
 项目专属知识（界面约定等）不在本 skill 中：查看项目 `.agents/skills/` 下的其他 skill；如何编写见仓库 README「为你的项目编写自定义 skill」一节。
 

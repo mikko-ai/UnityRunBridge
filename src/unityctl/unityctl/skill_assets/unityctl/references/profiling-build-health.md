@@ -2,6 +2,8 @@
 
 适用场景：性能采样（profile）、Player 构建诊断（build）、项目健康检查（health）。命令输出均为 JSON 信封（成功 `{"ok": true, ...}`，失败 stderr `{"ok": false, "code", "message"}`）。
 
+**Capability**：`profiling` 与 `health` 属于 Core 能力，**不依赖** UGUI。`build` 走独立 batchmode 进程，也不经过 Bridge capability 门控。
+
 ## 性能采样（ProfilerRecorder，需 Play Mode）
 
 `unityctl profile` 用 `ProfilerRecorder` 逐帧采样一组固定计数器（v1 不支持自定义配置），写出 `metrics.jsonl`，用来在改动前后做相对回归比较。
@@ -49,6 +51,6 @@ unityctl health --check compilation,missing_scripts      # 只跑指定项（逗
   - `compilation`：触发 `refresh` 并等编译完成，编译失败判 `fail`。
   - `missing_scripts`：分两部分——已加载场景（复用 `hierarchy find --missing-script`）+ 项目内**全部** Prefab 资产（异步 job，按 50 个/tick 批处理避免卡主线程，资产数量大也不会卡住 Editor）；命中任一判 `fail`。
   - `build_scenes`：`EditorBuildSettings.scenes` 里指向不存在文件的条目判 `fail`；项目里存在但未加入该列表的 `.unity` 文件判 `warn`（仅提示，不算错误）。
-  - `packages`：`Packages/manifest.json` 与 `packages-lock.json` 依赖不一致，或 `ProjectSettings/ProjectVersion.txt` 记录的 Unity 版本与 `config.json` 的 `unityVersion` 不一致，判 `warn`。
+  - `packages`：`Packages/manifest.json` 与 `packages-lock.json` 依赖不一致，或 `ProjectSettings/ProjectVersion.txt` 记录的 Unity 版本与 `config.json` 的 `unityVersion` 不一致，判 `warn`。Core-only 项目未声明 UGUI 是预期行为，不会因此判 fail。
 - 每项检查独立输出 `{ "name", "status": "pass|warn|fail|skipped", "details": [...] }`；`compilation`/`missing_scripts` 需要 Bridge，Bridge 不可达时该项标记 `skipped` 并在 `details` 里说明原因，**不计入整体失败**（`build_scenes`/`packages` 是纯静态检查，任何时候都能跑，不需要先 `unityctl start`）。
 - 整体 `status` 取所有检查项里最差的一个（`fail` > `warn` > `pass`，`skipped` 不参与比较）；退出码：`pass`/`warn` 为 `0`，`fail` 为 `1`，CI 门禁友好。

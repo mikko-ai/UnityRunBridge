@@ -1,0 +1,22 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Tests.Composition.Integration",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Tests.Composition",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Core",
+    "Mk.UnityAgentBridge.Editor.Host"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "com.mk.unity-agent-bridge": "file:/absolute/path/to/UnityRunBridge/packages/com.mk.unity-agent-bridge",
+    "com.unity.ugui": "1.0.0"
+  }
+}

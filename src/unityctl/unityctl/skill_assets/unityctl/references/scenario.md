@@ -2,6 +2,8 @@
 
 适用场景：编写/校验/执行可复跑验证脚本（scenario validate/run/from-recording）。命令输出均为 JSON 信封（成功 `{"ok": true, ...}`，失败 stderr `{"ok": false, "code", "message"}`）。
 
+**依赖提示**：含 `click`/`input`/`set-value`/`from-recording` 的 scenario 需要项目已安装 UGUI（Bridge 声明 `interaction`/`recording`）；纯 `open-scene`/`play`/`stop`/`assert log`/`profile-*` 等步骤在 Core-only 项目也可跑。缺 capability 时对应步骤会以 `bridge_capability_missing` 失败。
+
 ## Scenario：可复跑的自动化验证脚本
 
 `unityctl scenario` 把「打开场景 → 操作 UI → 等待收敛 → 断言事实」的一次验证固化成 JSON 文件，可重复执行、机器判定通过/失败，取代 agent 每次读日志主观判断。断言判定全部在 CLI 侧完成（Bridge 只提供 hierarchy/日志/gameplay 事实），v1 是线性步骤表：**无变量、无条件分支、无循环**。

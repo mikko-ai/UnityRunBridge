@@ -1,0 +1,24 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Adapters.LegacyInput.Tests",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Adapters.LegacyInput.Tests",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Adapters.LegacyInput",
+    "Mk.UnityAgentBridge.Editor.Core"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "ENABLE_LEGACY_INPUT_MANAGER"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

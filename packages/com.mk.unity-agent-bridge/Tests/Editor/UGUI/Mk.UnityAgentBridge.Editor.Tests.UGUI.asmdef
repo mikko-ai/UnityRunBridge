@@ -1,0 +1,31 @@
+{
+  "name": "Mk.UnityAgentBridge.Editor.Tests.UGUI",
+  "rootNamespace": "Mk.UnityAgentBridge.Editor.Tests",
+  "references": [
+    "Mk.UnityAgentBridge.Editor.Core",
+    "Mk.UnityAgentBridge.Editor.Features",
+    "UnityEngine.UI"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MK_HAS_UGUI"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "MK_HAS_UGUI"
+    }
+  ],
+  "noEngineReferences": false
+}
