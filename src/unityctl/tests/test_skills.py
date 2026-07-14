@@ -262,7 +262,13 @@ def test_real_assets_install(tmp_path, capsys):
     creator_dir = project / ".agents" / "skills" / "unityctl-project-skill-creator"
     creator_md = (creator_dir / "SKILL.md").read_text(encoding="utf-8")
     assert "disable-model-invocation: true" in creator_md
-    assert (creator_dir / "flows" / "ui-location.md").exists()
+    assert "工具依赖契约" in creator_md
+    assert "官方 unityctl skill" in creator_md
+    ui_flow = (creator_dir / "flows" / "ui-location.md").read_text(encoding="utf-8")
+    assert "## 工具依赖" in ui_flow
+    assert ".agents/skills/unityctl/SKILL.md" in ui_flow
+    assert "references/hierarchy.md" in ui_flow
+    assert "references/interaction.md" in ui_flow
     assert (
         project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
     ).exists()

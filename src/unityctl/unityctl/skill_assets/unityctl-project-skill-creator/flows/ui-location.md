@@ -52,7 +52,7 @@
 - `<游戏名>` 默认取 `ProjectSettings/ProjectSettings.asset` 的 `productName`（读不到就问用户），转小写、空格与非法字符转 `-`。
 - 目标路径 `.agents/skills/<游戏名>-ui/SKILL.md`；目录已存在时询问「全量重建覆盖，还是换个名字」——只支持全量重建，不做增量修改。
 - 写入前把内容概要给用户确认。
-- 按以下模板生成，六节缺一不可；查询示例只写「本项目专用的具体查询」，禁止出现任何 unityctl 命令教学内容：
+- 按以下模板生成，下列各节缺一不可；查询示例只写「本项目专用的具体查询」，禁止出现任何 unityctl 命令教学内容：
 
 ~~~markdown
 ---
@@ -61,6 +61,13 @@ description: 在 <游戏名> 项目中定位、枚举、操作 UI 界面或判�
 ---
 
 # <游戏名> UI 定位
+
+## 工具依赖
+
+执行本 skill 时必须同时读取官方 `.agents/skills/unityctl/SKILL.md`。
+使用 `hierarchy` 前读取其 `references/hierarchy.md`；
+执行 `click` / `input` / `set-value` / `snapshot` / `record` 前读取其 `references/interaction.md`。
+参数、前置条件与错误处理以官方 skill / reference 为准；本文件只定义本项目的 UI 约定与验证过的查询。
 
 ## UI 根节点
 
@@ -86,5 +93,5 @@ description: 在 <游戏名> 项目中定位、枚举、操作 UI 界面或判�
 ## 纯问答降级模式（Editor 不可用时）
 
 - 跳过阶段 B / D 的探测与验证，规则全部来自用户访谈，一律标注 `用户口述，未验证`。
-- 生成物结构不变（六节齐全），并在正文开头加声明：「本文件生成时未经探测验证，建议 Editor 可用时重跑 creator 校验。」
+- 生成物结构不变（上述各节齐全），并在正文开头加声明：「本文件生成时未经探测验证，建议 Editor 可用时重跑 creator 校验。」
 - 这是合法产物：硬门槛是"禁止把未验证的规则标成已验证"，不是"没有验证就不能生成"。
