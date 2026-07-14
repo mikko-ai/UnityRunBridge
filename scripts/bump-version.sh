@@ -18,13 +18,13 @@ usage() {
   minor   递增 minor 版本（0.1.0 -> 0.2.0）
   major   递增 major 版本（0.1.0 -> 1.0.0）
   --no-push          仅本地 commit + tag，不 push
-  --skip-full-tests  跳过发布前全量测试（Python + Unity 全量矩阵）。
+  --skip-full-tests  提前跳过发布前全量测试（Python + Unity 全量矩阵）。
                       需要额外输入 SKIP 二次确认，不会静默跳过。
 
-打 tag 前会先在本地跑一遍全量测试（scripts/run-full-tests.sh：Python 单测 +
-Unity EditMode 全量矩阵，9 种 UGUI/TMP/InputSystem 组合），测试失败则中止，
-不会创建 commit/tag。这一步替代了原先跑在 GitHub Actions self-hosted
-runner 上的 Unity 矩阵门禁。
+打 tag 前会询问是否运行本地全量测试（scripts/run-full-tests.sh：Python 单测 +
+Unity EditMode 全量矩阵，9 种 UGUI/TMP/InputSystem 组合），默认 Yes；选择运行且
+测试失败则中止，不会创建 commit/tag。这一步替代了原先跑在 GitHub Actions
+self-hosted runner 上的 Unity 矩阵门禁。
 
 执行前会显示当前版本与目标版本，需输入 y 确认后才会继续。
 
@@ -178,14 +178,20 @@ if [[ "$SKIP_FULL_TESTS" == true ]]; then
   echo "已跳过全量测试。"
 else
   echo ""
-  echo "==> 运行发布前全量测试（scripts/run-full-tests.sh）..."
-  if ! bash "$SCRIPT_DIR/run-full-tests.sh"; then
+  read -r -p "是否运行发布前全量测试（Python + Unity 全量矩阵）？[Y/n] " RUN_TESTS_CONFIRM
+  if [[ -z "$RUN_TESTS_CONFIRM" || "$RUN_TESTS_CONFIRM" =~ ^[Yy]$ ]]; then
     echo ""
-    echo "全量测试失败，已中止发布（未创建 commit/tag）。"
-    echo "修复后重新运行，或确认要跳过时使用 --skip-full-tests。"
-    exit 1
+    echo "==> 运行发布前全量测试（scripts/run-full-tests.sh）..."
+    if ! bash "$SCRIPT_DIR/run-full-tests.sh"; then
+      echo ""
+      echo "全量测试失败，已中止发布（未创建 commit/tag）。"
+      echo "修复后重新运行，或在下一次运行时选择跳过测试。"
+      exit 1
+    fi
+    echo "全量测试通过。"
+  else
+    echo "已跳过全量测试。"
   fi
-  echo "全量测试通过。"
 fi
 
 # 文件同步委托给无副作用的 sync-version.sh（含 uv.lock 与一致性校验）
