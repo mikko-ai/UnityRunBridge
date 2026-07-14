@@ -29,6 +29,13 @@ unityctl snapshot --max-long-edge 800                # 单次覆盖输出长边�
 
 `click`/`input`/`set-value` 是模拟真实用户操作 UGUI 的顶层命令（跟 `play`/`stop` 同级，不是 `interaction` 子命令组），底层直接派发 Unity 事件系统的事件链（`IPointerDownHandler`/`onValueChanged` 等），不是修改内部状态。目标节点用 `hierarchy` 的 `path` 或 `instanceId` 定位。
 
+### 目标定位约束（必须遵守）
+
+- 截图仅用于理解当前画面与验证操作结果。截图可能经过长边缩放，尺寸不等于运行时屏幕；**禁止从截图像素坐标推导点击目标，也禁止选择视觉位置“最近”的按钮**。
+- 执行 `click` / `input` / `set-value` 前，必须通过 `hierarchy find` / `tree` / `inspect` 将目标解析为唯一的 `path` 或 `instanceId`，再按语义节点操作。
+- 查询返回多个候选时继续用节点名称、文本、组件、父子路径或 active 状态消歧；仍无法唯一确定时列出候选并请求用户确认，不得猜测。
+- 当前交互命令只支持 UGUI `GameObject`。UI Toolkit 的 `VisualElement` 不属于 `Transform` hierarchy；在 Bridge 提供对应语义查询与交互能力前，不得退化为截图坐标点击。
+
 ```bash
 unityctl click MainCanvas/ShopWindow/BuyButton              # 默认对目标 screenRect 中心做射线验证
 unityctl click MainCanvas/ShopWindow/BuyButton --force      # 跳过射线检测，明知可能被遮挡也强制派发（调试用）

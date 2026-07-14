@@ -269,6 +269,11 @@ def test_real_assets_install(tmp_path, capsys):
     assert ".agents/skills/unityctl/SKILL.md" in ui_flow
     assert "references/hierarchy.md" in ui_flow
     assert "references/interaction.md" in ui_flow
+    interaction_md = (
+        project / ".agents" / "skills" / "unityctl" / "references" / "interaction.md"
+    ).read_text(encoding="utf-8")
+    assert "禁止从截图像素坐标推导点击目标" in interaction_md
+    assert "path` 或 `instanceId" in interaction_md
     assert (
         project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
     ).exists()
