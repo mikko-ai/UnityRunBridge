@@ -12,18 +12,26 @@ UNITYCTL_DIR="$REPO_ROOT/src/unityctl"
 
 usage() {
   cat <<'EOF'
-用法：scripts/bump-version.sh {patch|minor|major} [--no-push]
+用法：scripts/bump-version.sh {patch|minor|major} [--no-push] [--skip-full-tests]
 
   patch   递增 patch 版本（0.1.0 -> 0.1.1）
   minor   递增 minor 版本（0.1.0 -> 0.2.0）
   major   递增 major 版本（0.1.0 -> 1.0.0）
-  --no-push  仅本地 commit + tag，不 push
+  --no-push          仅本地 commit + tag，不 push
+  --skip-full-tests  跳过发布前全量测试（Python + Unity 全量矩阵）。
+                      需要额外输入 SKIP 二次确认，不会静默跳过。
+
+打 tag 前会先在本地跑一遍全量测试（scripts/run-full-tests.sh：Python 单测 +
+Unity EditMode 全量矩阵，9 种 UGUI/TMP/InputSystem 组合），测试失败则中止，
+不会创建 commit/tag。这一步替代了原先跑在 GitHub Actions self-hosted
+runner 上的 Unity 矩阵门禁。
 
 执行前会显示当前版本与目标版本，需输入 y 确认后才会继续。
 
 示例：
   scripts/bump-version.sh patch
   scripts/bump-version.sh minor --no-push
+  scripts/bump-version.sh patch --skip-full-tests
 EOF
 }
 
@@ -34,12 +42,17 @@ fi
 
 BUMP_KIND="$1"
 NO_PUSH=false
+SKIP_FULL_TESTS=false
 shift
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-push)
       NO_PUSH=true
+      shift
+      ;;
+    --skip-full-tests)
+      SKIP_FULL_TESTS=true
       shift
       ;;
     -h|--help)
@@ -153,6 +166,28 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
+if [[ "$SKIP_FULL_TESTS" == true ]]; then
+  echo ""
+  echo "⚠️  已选择 --skip-full-tests：将跳过 Python + Unity 全量矩阵测试直接发布。"
+  echo "⚠️  这会跳过发布前唯一的自动化正确性校验，风险自负。"
+  read -r -p "确认跳过测试？输入 SKIP 继续，其他任意输入将取消： " SKIP_CONFIRM
+  if [[ "$SKIP_CONFIRM" != "SKIP" ]]; then
+    echo "未输入 SKIP，已取消。"
+    exit 0
+  fi
+  echo "已跳过全量测试。"
+else
+  echo ""
+  echo "==> 运行发布前全量测试（scripts/run-full-tests.sh）..."
+  if ! bash "$SCRIPT_DIR/run-full-tests.sh"; then
+    echo ""
+    echo "全量测试失败，已中止发布（未创建 commit/tag）。"
+    echo "修复后重新运行，或确认要跳过时使用 --skip-full-tests。"
+    exit 1
+  fi
+  echo "全量测试通过。"
+fi
+
 # 文件同步委托给无副作用的 sync-version.sh（含 uv.lock 与一致性校验）
 bash "$SCRIPT_DIR/sync-version.sh" "$NEW_VERSION"
 
@@ -182,4 +217,4 @@ echo "推送 main 与 tag..."
 git -C "$REPO_ROOT" push origin main
 git -C "$REPO_ROOT" push origin "$TAG_NAME"
 
-echo "完成：${TAG_NAME} 已推送，GitHub Actions 将自动发布 Release。"
+echo "完成：${TAG_NAME} 已推送，GitHub Actions 将校验 tag、跑 Python 测试并发布 Release。"

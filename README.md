@@ -543,7 +543,15 @@ scripts/bump-version.sh patch
 # 仅本地完成、不 push：scripts/bump-version.sh patch --no-push
 ```
 
-2. 脚本默认 push `main` 与 `vX.Y.Z` tag；GitHub Actions 会自动：
+   打 tag 前脚本会先在本地跑一遍全量测试（`scripts/run-full-tests.sh`：Python
+   单测 + Unity EditMode 全量矩阵，9 种 UGUI/TMP/InputSystem 组合），失败则中止、
+   不创建 commit/tag。这一步需要本机装有对应版本的 Unity Editor
+   （`UNITY_BIN` 默认指向 `/Applications/Unity/Hub/Editor/2022.3.62f2/...`）并已
+   激活 license；如需跳过，传 `--skip-full-tests`（会要求额外输入 `SKIP` 二次确认，
+   不会静默跳过）。
+
+2. 脚本默认 push `main` 与 `vX.Y.Z` tag；GitHub Actions（`release.yml`，跑在 GitHub
+   托管 runner 上，不依赖任何 self-hosted 机器）会自动：
    - 校验 tag 位于 `main` 历史上
    - 校验 tag 与 `package.json` / `pyproject.toml` / `__init__.py` 版本一致
    - 运行 Python 测试
