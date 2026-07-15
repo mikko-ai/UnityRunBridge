@@ -1,7 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using Mk.UnityAgentBridge.Editor.Hierarchy;
 using Mk.UnityAgentBridge.Editor.Interaction;
 using Mk.UnityAgentBridge.Editor.Json;
+using Mk.UnityAgentBridge.Editor.Routing;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -130,7 +133,99 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                 foreach (GameObject go in tracked) DestroyIfAlive(go);
             }
 
-            // --- 场景 4：submit=true 触发 onEndEdit 并取消选中 ---
+            // --- 场景 4：Controller 输入经真实 InputField、NodePath 和审计出口 ---
+            {
+                const string secret = "controller-secret";
+                const string diskFullText = "controller-disk-full";
+                List<GameObject> tracked = new List<GameObject>();
+                CreateEventSystemPlay(tracked);
+                InputField field = CreateInputFieldPlay(tracked, "InputSimulatorTests_ControllerInput");
+                List<string> lines = new List<string>();
+
+                try
+                {
+                    InteractionAuditLog.SetHooksForTests(
+                        () => "/virtual/artifacts",
+                        (_, text) => lines.Add(text));
+
+                    yield return null;
+
+                    string path = NodePath.BuildPath(field.transform);
+                    object raw = InteractionController.Input(
+                        BridgeRequestContext.ForTests(
+                            rawBody: $"{{\"path\":\"{path}\",\"text\":\"{secret}\",\"submit\":false}}"));
+
+                    Assert.IsTrue(((BridgeResponse)raw).ok);
+                    Assert.AreEqual("ok", ((BridgeResponse)raw).code);
+                    Assert.AreEqual(secret, field.text);
+                    Assert.AreEqual(1, lines.Count);
+                    StringAssert.DoesNotContain(secret, lines[0]);
+                    JsonValue audit = JsonParser.Parse(lines[0]);
+                    Assert.AreEqual(secret.Length, audit["request"]["textLength"].AsInt);
+
+                    InteractionAuditLog.SetHooksForTests(
+                        () => "/virtual/artifacts",
+                        (_, __) => throw new IOException("disk full"));
+                    LogAssert.Expect(
+                        LogType.Warning,
+                        "Unity Agent Bridge: 写入 interaction-actions.jsonl 失败：disk full");
+
+                    raw = InteractionController.Input(
+                        BridgeRequestContext.ForTests(
+                            rawBody: $"{{\"path\":\"{path}\",\"text\":\"{diskFullText}\",\"submit\":false}}"));
+
+                    Assert.IsTrue(((BridgeResponse)raw).ok);
+                    Assert.AreEqual("ok", ((BridgeResponse)raw).code);
+                    Assert.AreEqual(diskFullText, field.text);
+                }
+                finally
+                {
+                    InteractionAuditLog.ResetForTests();
+                    foreach (GameObject go in tracked) DestroyIfAlive(go);
+                }
+            }
+
+            // --- 场景 5：Controller set-value 经真实 Slider、NodePath 和审计出口 ---
+            {
+                List<GameObject> tracked = new List<GameObject>();
+                CreateEventSystemPlay(tracked);
+                Slider slider = SpawnPlay(tracked, "InputSimulatorTests_ControllerSlider").AddComponent<Slider>();
+                slider.minValue = 0;
+                slider.maxValue = 1;
+                List<string> lines = new List<string>();
+
+                try
+                {
+                    InteractionAuditLog.SetHooksForTests(
+                        () => "/virtual/artifacts",
+                        (_, text) => lines.Add(text));
+
+                    yield return null;
+
+                    string path = NodePath.BuildPath(slider.transform);
+                    object raw = InteractionController.SetValue(
+                        BridgeRequestContext.ForTests(
+                            rawBody: $"{{\"path\":\"{path}\",\"value\":0.75}}"));
+                    JsonValue response = (JsonValue)raw;
+
+                    Assert.IsTrue(response["ok"].AsBoolean);
+                    Assert.IsFalse(response.ContainsKey("code"));
+                    Assert.AreEqual("Slider", response["component"].AsString);
+                    Assert.AreEqual(0.75f, slider.value, 0.001f);
+                    JsonValue audit = JsonParser.Parse(lines[0]);
+                    Assert.AreEqual("ok", audit["code"].AsString);
+                    Assert.AreEqual("Slider", audit["component"].AsString);
+                    Assert.AreEqual("number", audit["request"]["valueKind"].AsString);
+                    Assert.AreEqual(0.75, audit["request"]["value"].AsDouble, 0.001);
+                }
+                finally
+                {
+                    InteractionAuditLog.ResetForTests();
+                    foreach (GameObject go in tracked) DestroyIfAlive(go);
+                }
+            }
+
+            // --- 场景 6：submit=true 触发 onEndEdit 并取消选中 ---
             {
                 List<GameObject> tracked = new List<GameObject>();
                 EventSystem eventSystem = CreateEventSystemPlay(tracked);
@@ -149,7 +244,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                 foreach (GameObject go in tracked) DestroyIfAlive(go);
             }
 
-            // --- 场景 5：interactable=false ---
+            // --- 场景 7：interactable=false ---
             {
                 List<GameObject> tracked = new List<GameObject>();
                 CreateEventSystemPlay(tracked);
