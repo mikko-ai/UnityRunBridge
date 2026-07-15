@@ -25,7 +25,8 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             string scene = body != null && body.TryGetString("scene", out string sceneValue)
                 ? sceneValue
                 : null;
-            if (body == null || !body.TryGetString("path", out string path))
+            if (body == null || !body.TryGetString("path", out string path) ||
+                string.IsNullOrWhiteSpace(path))
             {
                 return AuditAndReturn(
                     "click", request, scene,
@@ -91,7 +92,8 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             string scene = body != null && body.TryGetString("scene", out string sceneValue)
                 ? sceneValue
                 : null;
-            if (body == null || !body.TryGetString("path", out string path))
+            if (body == null || !body.TryGetString("path", out string path) ||
+                string.IsNullOrWhiteSpace(path))
             {
                 return AuditAndReturn(
                     "input", request, scene,
@@ -136,7 +138,8 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             string scene = body != null && body.TryGetString("scene", out string sceneValue)
                 ? sceneValue
                 : null;
-            if (body == null || !body.TryGetString("path", out string path))
+            if (body == null || !body.TryGetString("path", out string path) ||
+                string.IsNullOrWhiteSpace(path))
             {
                 return AuditAndReturn(
                     "set-value", request, scene,

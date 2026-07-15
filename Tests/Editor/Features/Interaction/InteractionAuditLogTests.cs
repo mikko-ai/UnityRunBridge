@@ -215,38 +215,16 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
         }
 
         [Test]
-        public void RequireNoActiveSessionForDirectoryTest_WhenActive_ThrowsIgnoreBeforeContinuing()
+        public void AppendFromResponse_WithoutSession_AppendsParseableLineToTemporaryScratch()
         {
-            bool continued = false;
-
-            Assert.Throws<IgnoreException>(() =>
-            {
-                RequireNoActiveSessionForDirectoryTest(true);
-                continued = true;
-            });
-
-            Assert.IsFalse(continued);
-        }
-
-        [Test]
-        public void RequireNoActiveSessionForDirectoryTest_WhenInactive_DoesNotThrow()
-        {
-            Assert.DoesNotThrow(() => RequireNoActiveSessionForDirectoryTest(false));
-        }
-
-        [Test]
-        public void AppendFromResponse_WithoutSession_AppendsParseableLineToScratch()
-        {
-            RequireNoActiveSessionForDirectoryTest(SessionService.HasActiveSession);
-            string path = Path.Combine(
-                ArtifactPathGuard.GetScratchRoot(ArtifactPathGuard.GetProjectRoot()),
-                "interaction-actions.jsonl");
-            bool existed = File.Exists(path);
-            byte[] original = existed ? File.ReadAllBytes(path) : null;
+            string temporaryRoot = CreateTemporaryRoot();
+            string scratchDirectory = Path.Combine(temporaryRoot, ".unity-agent", "scratch");
+            string path = Path.Combine(scratchDirectory, "interaction-actions.jsonl");
+            Directory.CreateDirectory(scratchDirectory);
+            InteractionAuditLog.SetHooksForTests(() => scratchDirectory, null);
 
             try
             {
-                int previousLineCount = CountLines(path);
                 InteractionAuditLog.AppendFromResponse(
                     "input",
                     InteractionAuditLog.BuildRequestSummary("input", JsonParser.Parse("{\"path\":\"Main/Input\",\"text\":\"secret\"}")),
@@ -254,32 +232,28 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     BridgeResponse.Success("ok", "input applied"),
                     2);
 
-                Assert.AreEqual(previousLineCount + 1, CountLines(path));
+                Assert.IsTrue(File.Exists(path));
+                Assert.AreEqual(1, CountLines(path));
                 JsonParser.Parse(LastLine(path));
             }
             finally
             {
-                RestoreFile(path, existed, original);
+                Directory.Delete(temporaryRoot, true);
             }
         }
 
         [Test]
-        public void AppendFromResponse_WithSession_AppendsParseableLineToSessionArtifacts()
+        public void AppendFromResponse_WithSession_AppendsParseableLineToTemporarySessionArtifacts()
         {
-            RequireNoActiveSessionForDirectoryTest(SessionService.HasActiveSession);
-            string projectRoot = ArtifactPathGuard.GetProjectRoot();
-            string sessionPath = Path.Combine(
-                ArtifactPathGuard.GetSessionsRoot(projectRoot),
-                "interaction-audit-test-" + Guid.NewGuid().ToString("N"));
-            string path = Path.Combine(sessionPath, "artifacts", "interaction-actions.jsonl");
-            bool testSessionStarted = false;
+            string temporaryRoot = CreateTemporaryRoot();
+            string artifactDirectory = Path.Combine(
+                temporaryRoot, ".unity-agent", "sessions", "test-session", "artifacts");
+            string path = Path.Combine(artifactDirectory, "interaction-actions.jsonl");
+            Directory.CreateDirectory(artifactDirectory);
+            InteractionAuditLog.SetHooksForTests(() => artifactDirectory, null);
 
             try
             {
-                BridgeResponse started = SessionService.StartSession(
-                    "interaction-audit-test", sessionPath);
-                testSessionStarted = started.ok;
-                Assert.IsTrue(started.ok, started.message);
                 InteractionAuditLog.AppendFromResponse(
                     "click",
                     InteractionAuditLog.BuildRequestSummary("click", JsonParser.Parse("{\"path\":\"Main/Button\"}")),
@@ -288,24 +262,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     2);
 
                 Assert.IsTrue(File.Exists(path));
+                Assert.AreEqual(1, CountLines(path));
                 JsonParser.Parse(LastLine(path));
             }
             finally
             {
-                try
-                {
-                    if (testSessionStarted)
-                    {
-                        SessionService.EndSession();
-                    }
-                }
-                finally
-                {
-                    if (Directory.Exists(sessionPath))
-                    {
-                        Directory.Delete(sessionPath, true);
-                    }
-                }
+                Directory.Delete(temporaryRoot, true);
             }
         }
 
@@ -354,24 +316,13 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             return lines[lines.Length - 1];
         }
 
-        private static void RestoreFile(string path, bool existed, byte[] original)
+        private static string CreateTemporaryRoot()
         {
-            if (existed)
-            {
-                File.WriteAllBytes(path, original);
-            }
-            else if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-
-        private static void RequireNoActiveSessionForDirectoryTest(bool hasActiveSession)
-        {
-            if (hasActiveSession)
-            {
-                Assert.Ignore("真实目录测试要求无活动 session，避免破坏 sequence/runIndex");
-            }
+            string path = Path.Combine(
+                Path.GetTempPath(),
+                "UnityRunBridge-InteractionAudit-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            return path;
         }
     }
 }
