@@ -78,6 +78,7 @@ def test_init_project_config_copies_bundled_schemas(tmp_path):
     assert (schemas_dir / "config.schema.json").exists()
     assert (schemas_dir / "bridge.schema.json").exists()
     assert (schemas_dir / "session.schema.json").exists()
+    assert (schemas_dir / "interaction-actions.schema.json").exists()
 
 
 def test_init_project_config_keeps_existing_files_and_only_creates_missing(tmp_path):

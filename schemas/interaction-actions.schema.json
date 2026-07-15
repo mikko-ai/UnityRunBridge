@@ -1,0 +1,500 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/interaction-actions.schema.json",
+  "title": "Unity Agent Bridge Interaction Audit Action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "time",
+    "action",
+    "ok",
+    "code",
+    "request",
+    "durationMs",
+    "playModeFrame",
+    "activeScenePath"
+  ],
+  "properties": {
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "click",
+        "input",
+        "set-value"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "request": {
+      "type": "object"
+    },
+    "scene": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message": {
+      "type": "string"
+    },
+    "clicked": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raycastHit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "forced": {
+      "type": "boolean"
+    },
+    "blockedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "component": {
+      "type": "string",
+      "minLength": 1
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "playModeFrame": {
+      "type": "integer",
+      "minimum": -1
+    },
+    "activeScenePath": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "properties": {
+          "code": {
+            "const": "ok"
+          }
+        },
+        "not": {
+          "required": [
+            "message"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "properties": {
+          "code": {
+            "not": {
+              "const": "ok"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {
+            "const": "occluded"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "then": {
+        "required": [
+          "blockedBy"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "blockedBy"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "code": {
+            "not": {
+              "const": "invalid_argument"
+            }
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "then": {
+        "properties": {
+          "request": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "click"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "force"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "force": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "then": {
+          "required": [
+            "clicked",
+            "raycastHit",
+            "events",
+            "forced"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "input",
+              "set-value"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "clicked"
+              ]
+            },
+            {
+              "required": [
+                "raycastHit"
+              ]
+            },
+            {
+              "required": [
+                "events"
+              ]
+            },
+            {
+              "required": [
+                "forced"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "set-value"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "valueKind"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "valueKind": {
+                "type": "string",
+                "enum": [
+                  "number",
+                  "boolean",
+                  "object",
+                  "string",
+                  "unknown",
+                  "invalid"
+                ]
+              },
+              "value": {},
+              "valueLength": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "then": {
+          "required": [
+            "component"
+          ]
+        },
+        "else": {
+          "not": {
+            "required": [
+              "component"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "request": {
+                  "properties": {
+                    "valueKind": {
+                      "const": "number"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "required": [
+                    "value"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "request": {
+                  "properties": {
+                    "valueKind": {
+                      "const": "boolean"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "required": [
+                    "value"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "request": {
+                  "properties": {
+                    "valueKind": {
+                      "const": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "required": [
+                    "value"
+                  ],
+                  "properties": {
+                    "value": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "request": {
+                  "properties": {
+                    "valueKind": {
+                      "enum": [
+                        "string",
+                        "unknown",
+                        "invalid"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "request": {
+                  "not": {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "set-value"
+          },
+          "ok": {
+            "const": true
+          }
+        },
+        "required": [
+          "action",
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "component"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "component"
+          ]
+        }
+      }
+    }
+  ]
+}

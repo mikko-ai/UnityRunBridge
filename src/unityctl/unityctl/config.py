@@ -33,6 +33,7 @@ SCHEMA_FILENAMES = (
     "log-rules.schema.json",
     "unity-console-log.schema.json",
     "actions.schema.json",
+    "interaction-actions.schema.json",
     "recording-meta.schema.json",
     "scenario.schema.json",
     "scenario-result.schema.json",
