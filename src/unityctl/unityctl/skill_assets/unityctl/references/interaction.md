@@ -36,6 +36,35 @@ unityctl snapshot --max-long-edge 800                # 单次覆盖输出长边�
 - 查询返回多个候选时继续用节点名称、文本、组件、父子路径或 active 状态消歧；仍无法唯一确定时列出候选并请求用户确认，不得猜测。
 - 当前交互命令只支持 UGUI `GameObject`。UI Toolkit 的 `VisualElement` 不属于 `Transform` hierarchy；在 Bridge 提供对应语义查询与交互能力前，不得退化为截图坐标点击。
 
+### 自适应探索闭环
+
+未知流程或下一步依赖当前状态时，每一步必须：
+
+1. 用 `hierarchy find` / `tree` / `inspect` 消歧为唯一 `path` 或 `instanceId`。
+2. 直接执行一条 `unityctl ...`，不要把未知多步流程打包成一次性长 shell/Python。
+3. 保留完整 JSON 回执；需要复盘时对照当前 session 的 `artifacts/interaction-actions.jsonl`（无 session 时位于 `.unity-agent/scratch/`）。
+4. 用 hierarchy / gameplay / log 验证预期业务变化。
+5. 必要时截图理解或复核画面，但不得由像素推导点击目标。
+6. 根据验证结果再决策；`occluded` 时先读取并处理 `blockedBy`。
+
+### 三级证据
+
+- L1：命令到达且未被参数/能力门拒绝，不能宣称成功。
+- L2：`click` 的 `clicked`/`events`，或 `input`/`set-value` 对应 adapter 已接受并应用，仍不能宣称业务成功。
+- L3：hierarchy / gameplay / log / snapshot 显示业务状态符合意图，才可宣称“界面已打开”或其他业务成功结论。
+
+只有 L3 能宣称界面或业务成功；L1、L2 只能说明命令或适配器层已执行。
+
+### 禁止项
+
+- 未知探索使用一次性长 shell/Python。
+- `|| true` 吞错。
+- grep `"clicked"` 代替 JSON 语义。
+- 无观测空等。
+- 截图像素/欧氏距离选最近按钮。
+- path 含 `[index]` 时不加引号。
+- zsh 函数使用 `local path=`，因为会绑定并破坏 `PATH`。
+
 ```bash
 unityctl click MainCanvas/ShopWindow/BuyButton              # 默认对目标 screenRect 中心做射线验证
 unityctl click MainCanvas/ShopWindow/BuyButton --force      # 跳过射线检测，明知可能被遮挡也强制派发（调试用）

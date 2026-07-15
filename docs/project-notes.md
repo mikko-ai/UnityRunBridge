@@ -96,7 +96,7 @@ Unity 的 Play Mode 进入/退出、脚本重编译都是异步的。`play`、`s
 - **路由/能力注册**（`Editor/Routing/`）：把原来硬编码的 HTTP 路由表改成显式注册机制（`RouteTable.Register`），每个功能模块的 Controller 在加载时自行注册路由，并向 `CapabilityRegistry` 声明自己提供的能力名；`GET /capabilities` 汇总输出，CLI 侧用它判断 Bridge（UPM 包）版本是否支持某个命令，缺失时报 `bridge_capability_missing` 而不是笼统的 404。
 - **异步 job 模型**（`Editor/Jobs/`）：截图、Prefab 扫描等耗时操作不能阻塞 HTTP 请求线程，也不能一次性做完（会卡住 Editor 主线程），统一抽象成「`POST .../start` 返回 `jobId` → 轮询 `GET /jobs/{id}` → 终态 `succeeded`/`failed`」的模式。`JobManager` 负责生命周期、并发数上限、超时熔断；domain reload 会清空内存态，`JobManager` 用 `SessionState` 记录"reload 前有正在跑的 job"，reload 后统一标成 `failed`（`interrupted_by_reload`），如实上报而不是让调用方永久卡在轮询。
 - **手写 JSON 层**（`Editor/Json/`）：没有引入 `com.unity.nuget.newtonsoft-json` 依赖，而是自己写了一个 Newtonsoft 风格但更精简的 `JsonParser`/`JsonWriter`/`JsonValue`，Editor-only、无第三方依赖、行为可控（递归深度/输入体积上限、确定性 key 顺序，便于测试断言）。
-- **session artifacts 目录约定**：新增能力的产物（截图、`actions.jsonl`、`metrics.jsonl`、`gameplay-invokes.jsonl`）统一落在当前 session 的 `artifacts/` 下，没有 session 时落 `.unity-agent/scratch/`；`ArtifactPathGuard` 校验落盘路径必须在这两类目录之内，防止任意路径写入。
+- **session artifacts 目录约定**：新增能力的产物（截图、`interaction-actions.jsonl`、`actions.jsonl`、`metrics.jsonl`、`gameplay-invokes.jsonl`）统一落在当前 session 的 `artifacts/` 下，没有 session 时落 `.unity-agent/scratch/`；其中 `interaction-actions.jsonl` 与手工录制的 `actions.jsonl` 分离。`ArtifactPathGuard` 校验落盘路径必须在这两类目录之内，防止任意路径写入。
 
 ### Phase 1：结构化理解（只读）
 

@@ -424,6 +424,7 @@ schemas/session.schema.json
 schemas/unity-console-log.schema.json
 schemas/summary.schema.json
 schemas/log-rules.schema.json
+schemas/interaction-actions.schema.json  # Bridge 交互命令产出的 interaction-actions.jsonl（逐行）
 schemas/actions.schema.json          # unityctl record 产出的 actions.jsonl
 schemas/recording-meta.schema.json   # unityctl record 产出的 recording-meta.json
 schemas/scenario.schema.json         # unityctl scenario run/validate 的输入文件

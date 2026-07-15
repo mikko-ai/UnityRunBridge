@@ -264,6 +264,7 @@ def test_real_assets_install(tmp_path, capsys):
     assert "disable-model-invocation: true" in creator_md
     assert "工具依赖契约" in creator_md
     assert "官方 unityctl skill" in creator_md
+    assert "自适应 UI 探索" in content
     ui_flow = (creator_dir / "flows" / "ui-location.md").read_text(encoding="utf-8")
     assert "## 工具依赖" in ui_flow
     assert ".agents/skills/unityctl/SKILL.md" in ui_flow
@@ -274,6 +275,12 @@ def test_real_assets_install(tmp_path, capsys):
     ).read_text(encoding="utf-8")
     assert "禁止从截图像素坐标推导点击目标" in interaction_md
     assert "path` 或 `instanceId" in interaction_md
+    assert "自适应探索闭环" in interaction_md
+    assert "三级证据" in interaction_md
+    assert "不能宣称" in interaction_md
+    assert "一次性长 shell/Python" in interaction_md
+    assert "interaction-actions.jsonl" in interaction_md
+    assert "local path=" in interaction_md
     assert (
         project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
     ).exists()
