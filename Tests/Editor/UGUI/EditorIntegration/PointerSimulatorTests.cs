@@ -1,6 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
+using Mk.UnityAgentBridge.Editor.Hierarchy;
 using Mk.UnityAgentBridge.Editor.Interaction;
+using Mk.UnityAgentBridge.Editor.Json;
+using Mk.UnityAgentBridge.Editor.Routing;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -129,7 +132,52 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                 DestroyIfAlive(eventSystem.gameObject);
             }
 
-            // --- 场景 4：被全屏遮挡层挡住 ---
+            // --- 场景 4：Controller 点击走真实 EventSystem、NodePath 和审计出口 ---
+            {
+                EventSystem eventSystem = CreateEventSystem();
+                Canvas canvas = CreateOverlayCanvas();
+                Button button = CreateButton(
+                    canvas.transform,
+                    "PointerSimulatorTests_ControllerClickable",
+                    new Vector2(100, 100),
+                    new Vector2(200, 60));
+                List<string> lines = new List<string>();
+
+                try
+                {
+                    InteractionAuditLog.SetHooksForTests(
+                        () => "/virtual/artifacts",
+                        (_, text) => lines.Add(text));
+
+                    yield return null;
+
+                    string path = NodePath.BuildPath(button.transform);
+                    object raw = InteractionController.Click(
+                        BridgeRequestContext.ForTests(
+                            rawBody: $"{{\"path\":\"{path}\",\"force\":false}}"));
+                    JsonValue response = (JsonValue)raw;
+
+                    Assert.IsTrue(response["ok"].AsBoolean);
+                    Assert.IsFalse(response.ContainsKey("code"));
+                    Assert.AreEqual(path, response["clicked"].AsString);
+                    Assert.AreEqual(1, lines.Count);
+                    JsonValue audit = JsonParser.Parse(lines[0]);
+                    Assert.IsTrue(audit["ok"].AsBoolean);
+                    Assert.AreEqual("ok", audit["code"].AsString);
+                    Assert.AreEqual(path, audit["request"]["path"].AsString);
+                    CollectionAssert.Contains(
+                        audit["events"].Items.ConvertAll(item => item.AsString),
+                        "pointerClick");
+                }
+                finally
+                {
+                    InteractionAuditLog.ResetForTests();
+                    DestroyIfAlive(canvas.gameObject);
+                    DestroyIfAlive(eventSystem.gameObject);
+                }
+            }
+
+            // --- 场景 5：被全屏遮挡层挡住 ---
             {
                 EventSystem eventSystem = CreateEventSystem();
                 Canvas canvas = CreateOverlayCanvas();
@@ -156,7 +204,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                 DestroyIfAlive(eventSystem.gameObject);
             }
 
-            // --- 场景 5：force=true 绕过遮挡检测 ---
+            // --- 场景 6：force=true 绕过遮挡检测 ---
             {
                 EventSystem eventSystem = CreateEventSystem();
                 Canvas canvas = CreateOverlayCanvas();
@@ -185,7 +233,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                 DestroyIfAlive(eventSystem.gameObject);
             }
 
-            // --- 场景 6：interactable=false ---
+            // --- 场景 7：interactable=false ---
             {
                 EventSystem eventSystem = CreateEventSystem();
                 Canvas canvas = CreateOverlayCanvas();
