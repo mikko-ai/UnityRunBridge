@@ -131,33 +131,102 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             Assert.AreEqual("not_in_play_mode", ((BridgeResponse)result).code);
         }
 
-        [TestCase("click", "{}")]
-        [TestCase("input", "{\"text\":\"do-not-log-this-secret\"}")]
-        [TestCase("set-value", "{\"value\":1}")]
-        public void MissingPath_AuditsInvalidArgument(string action, string rawBody)
+        [Test]
+        public void Click_MissingPath_AuditsNormalizedRequest()
         {
-            AssertAuditedFailure(action, rawBody, "invalid_argument");
+            AssertAuditedFailure("click", "{}", "invalid_argument", request =>
+            {
+                Assert.IsFalse(request.ContainsKey("path"));
+                Assert.IsFalse(request["force"].AsBoolean);
+            });
         }
 
-        [TestCase("click", "{\"path\":\"Foo\"}")]
-        [TestCase("input", "{\"path\":\"Foo\",\"text\":\"do-not-log-this-secret\"}")]
-        [TestCase("set-value", "{\"path\":\"Foo\",\"value\":1}")]
-        public void Idle_AuditsNotInPlayMode(string action, string rawBody)
+        [Test]
+        public void Input_MissingPath_AuditsNormalizedRequest()
         {
-            AssertAuditedFailure(action, rawBody, "not_in_play_mode");
+            AssertAuditedFailure("input", "{}", "invalid_argument", request =>
+            {
+                Assert.IsFalse(request.ContainsKey("path"));
+                Assert.IsFalse(request["submit"].AsBoolean);
+                Assert.IsFalse(request.ContainsKey("text"));
+                Assert.IsFalse(request.ContainsKey("textLength"));
+            });
         }
 
-        [TestCase("click", "{\"path\":\"Missing\"}")]
-        [TestCase("input", "{\"path\":\"Missing\",\"text\":\"do-not-log-this-secret\"}")]
-        [TestCase("set-value", "{\"path\":\"Missing\",\"value\":1}")]
-        public void PlayingWithMissingNode_AuditsNodeNotFound(string action, string rawBody)
+        [Test]
+        public void SetValue_MissingPath_AuditsNormalizedRequest()
+        {
+            AssertAuditedFailure("set-value", "{}", "invalid_argument", request =>
+            {
+                Assert.IsFalse(request.ContainsKey("path"));
+                Assert.AreEqual("invalid", request["valueKind"].AsString);
+                Assert.IsFalse(request.ContainsKey("value"));
+            });
+        }
+
+        [Test]
+        public void Click_Idle_AuditsNormalizedRequest()
+        {
+            AssertAuditedFailure(
+                "click", "{\"path\":\"Foo\",\"force\":true}", "not_in_play_mode",
+                request => AssertClickRequest(request, "Foo"));
+        }
+
+        [Test]
+        public void Input_Idle_AuditsNormalizedRequest()
+        {
+            AssertAuditedFailure(
+                "input",
+                "{\"path\":\"Foo\",\"text\":\"do-not-log-this-secret\",\"submit\":true}",
+                "not_in_play_mode",
+                request => AssertInputRequest(request, "Foo"));
+        }
+
+        [Test]
+        public void SetValue_Idle_AuditsNormalizedRequest()
+        {
+            AssertAuditedFailure(
+                "set-value", "{\"path\":\"Foo\",\"value\":1}", "not_in_play_mode",
+                request => AssertNumberRequest(request, "Foo", 1));
+        }
+
+        [Test]
+        public void Click_PlayingWithMissingNode_AuditsNormalizedRequest()
         {
             InteractionController.SetPlayModeStateProviderForTests(() => "playing");
 
-            AssertAuditedFailure(action, rawBody, "node_not_found");
+            AssertAuditedFailure(
+                "click", "{\"path\":\"Missing\",\"force\":true}", "node_not_found",
+                request => AssertClickRequest(request, "Missing"));
         }
 
-        private void AssertAuditedFailure(string action, string rawBody, string expectedCode)
+        [Test]
+        public void Input_PlayingWithMissingNode_AuditsNormalizedRequest()
+        {
+            InteractionController.SetPlayModeStateProviderForTests(() => "playing");
+
+            AssertAuditedFailure(
+                "input",
+                "{\"path\":\"Missing\",\"text\":\"do-not-log-this-secret\",\"submit\":true}",
+                "node_not_found",
+                request => AssertInputRequest(request, "Missing"));
+        }
+
+        [Test]
+        public void SetValue_PlayingWithMissingNode_AuditsNormalizedRequest()
+        {
+            InteractionController.SetPlayModeStateProviderForTests(() => "playing");
+
+            AssertAuditedFailure(
+                "set-value", "{\"path\":\"Missing\",\"value\":1}", "node_not_found",
+                request => AssertNumberRequest(request, "Missing", 1));
+        }
+
+        private void AssertAuditedFailure(
+            string action,
+            string rawBody,
+            string expectedCode,
+            Action<JsonValue> assertRequest)
         {
             int before = auditLines.Count;
             object result = Invoke(action, rawBody);
@@ -168,10 +237,32 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             Assert.IsFalse(audit["ok"].AsBoolean);
             Assert.AreEqual(expectedCode, audit["code"].AsString);
             Assert.AreEqual(expectedCode, ((BridgeResponse)result).code);
+            assertRequest(audit["request"]);
             if (action == "input")
             {
                 StringAssert.DoesNotContain(SecretInput, auditLines[before]);
             }
+        }
+
+        private static void AssertClickRequest(JsonValue request, string expectedPath)
+        {
+            Assert.AreEqual(expectedPath, request["path"].AsString);
+            Assert.IsTrue(request["force"].AsBoolean);
+        }
+
+        private static void AssertInputRequest(JsonValue request, string expectedPath)
+        {
+            Assert.AreEqual(expectedPath, request["path"].AsString);
+            Assert.AreEqual(SecretInput.Length, request["textLength"].AsInt);
+            Assert.IsTrue(request["submit"].AsBoolean);
+            Assert.IsFalse(request.ContainsKey("text"));
+        }
+
+        private static void AssertNumberRequest(JsonValue request, string expectedPath, int expectedValue)
+        {
+            Assert.AreEqual(expectedPath, request["path"].AsString);
+            Assert.AreEqual("number", request["valueKind"].AsString);
+            Assert.AreEqual(expectedValue, request["value"].AsInt);
         }
 
         private static object Invoke(string action, string rawBody)
