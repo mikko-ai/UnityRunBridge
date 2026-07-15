@@ -84,6 +84,13 @@ def validate_record(record: object) -> list[str]:
     if action == "click" and record.get("ok") is True:
         if not {"clicked", "raycastHit", "events", "forced"} <= record.keys():
             errors.append("click success fields required")
+    if action == "click" and record.get("ok") is not True and {
+        "clicked",
+        "raycastHit",
+        "events",
+        "forced",
+    } & record.keys():
+        errors.append("click failure cannot contain success fields")
     if action != "click" and {
         "clicked",
         "raycastHit",
@@ -251,6 +258,33 @@ def test_interaction_audit_schema_contains_all_contract_conditions():
     )
     assert success_branch["then"]["properties"]["code"] == {"const": "ok"}
     assert success_branch["then"]["not"] == {"required": ["message"]}
+
+    click_result_branch = next(
+        branch
+        for branch in all_of
+        if branch.get("if", {}).get("properties")
+        == {"action": {"const": "click"}, "ok": {"const": True}}
+    )
+    assert set(click_result_branch["if"]["required"]) == {"action", "ok"}
+    assert set(click_result_branch["then"]["required"]) == {
+        "clicked",
+        "raycastHit",
+        "events",
+        "forced",
+    }
+    click_failure_branch = click_result_branch["else"]
+    assert click_failure_branch["if"]["properties"] == {
+        "action": {"const": "click"}
+    }
+    assert click_failure_branch["if"]["required"] == ["action"]
+    assert click_failure_branch["then"]["not"] == {
+        "anyOf": [
+            {"required": ["clicked"]},
+            {"required": ["raycastHit"]},
+            {"required": ["events"]},
+            {"required": ["forced"]},
+        ]
+    }
 
     occluded_branch = next(
         branch
@@ -518,6 +552,22 @@ def test_validate_record_accepts_expected_success_cases():
             ),
             id="blocked-by-on-non-occluded-code",
         ),
+        *[
+            pytest.param(
+                _base_record(
+                    ok=False,
+                    code="node_not_found",
+                    **{field: value},
+                ),
+                id=f"failed-click-with-{field}",
+            )
+            for field, value in {
+                "clicked": "Canvas/Button",
+                "raycastHit": "Canvas/Button",
+                "events": ["pointerClick"],
+                "forced": False,
+            }.items()
+        ],
     ],
 )
 def test_validate_record_rejects_contract_errors(record: object):

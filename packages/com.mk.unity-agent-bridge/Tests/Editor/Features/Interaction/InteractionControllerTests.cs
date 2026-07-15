@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Mk.UnityAgentBridge.Editor.Interaction;
 using Mk.UnityAgentBridge.Editor.Json;
 using Mk.UnityAgentBridge.Editor.Routing;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
 {
@@ -164,6 +167,54 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             });
         }
 
+        [TestCase("click", "")]
+        [TestCase("click", "   ")]
+        [TestCase("input", "")]
+        [TestCase("input", "   ")]
+        [TestCase("set-value", "")]
+        [TestCase("set-value", "   ")]
+        public void WhitespacePath_ReturnsInvalidArgumentAndAuditsSchemaCompatibleFailure(
+            string action,
+            string path)
+        {
+            string rawBody = BuildBody(action, path);
+            int before = auditLines.Count;
+
+            object result = Invoke(action, rawBody);
+
+            Assert.IsInstanceOf<BridgeResponse>(result);
+            Assert.AreEqual("invalid_argument", ((BridgeResponse)result).code);
+            Assert.AreEqual(before + 1, auditLines.Count);
+            JsonValue audit = JsonParser.Parse(auditLines[before]);
+            Assert.AreEqual(action, audit["action"].AsString);
+            Assert.IsFalse(audit["ok"].AsBoolean);
+            Assert.AreEqual("invalid_argument", audit["code"].AsString);
+            Assert.IsFalse(audit["request"].ContainsKey("path"));
+            Assert.IsTrue(audit.ContainsKey("time"));
+            Assert.IsTrue(audit.ContainsKey("durationMs"));
+            Assert.IsTrue(audit.ContainsKey("playModeFrame"));
+            Assert.IsTrue(audit.ContainsKey("activeScenePath"));
+        }
+
+        [Test]
+        public void MissingPath_WhenAppenderThrows_PreservesInvalidArgumentResponse()
+        {
+            InteractionAuditLog.SetHooksForTests(
+                () => "/virtual/artifacts",
+                (_, __) => throw new IOException("disk full"));
+            LogAssert.Expect(
+                LogType.Warning,
+                "Unity Agent Bridge: 写入 interaction-actions.jsonl 失败：disk full");
+
+            object result = InteractionController.Click(BridgeRequestContext.ForTests(rawBody: "{}"));
+
+            Assert.IsInstanceOf<BridgeResponse>(result);
+            BridgeResponse response = (BridgeResponse)result;
+            Assert.IsFalse(response.ok);
+            Assert.AreEqual("invalid_argument", response.code);
+            Assert.AreEqual("body 必须包含字符串字段 path", response.message);
+        }
+
         [Test]
         public void Click_Idle_AuditsNormalizedRequest()
         {
@@ -276,6 +327,22 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     return InteractionController.Input(context);
                 case "set-value":
                     return InteractionController.SetValue(context);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(action));
+            }
+        }
+
+        private static string BuildBody(string action, string path)
+        {
+            string encodedPath = path.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            switch (action)
+            {
+                case "click":
+                    return "{\"path\":\"" + encodedPath + "\"}";
+                case "input":
+                    return "{\"path\":\"" + encodedPath + "\",\"text\":\"secret\"}";
+                case "set-value":
+                    return "{\"path\":\"" + encodedPath + "\",\"value\":1}";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(action));
             }

@@ -216,24 +216,68 @@
               }
             }
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "click"
+          },
+          "ok": {
+            "const": true
+          }
         },
+        "required": [
+          "action",
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "clicked",
+          "raycastHit",
+          "events",
+          "forced"
+        ]
+      },
+      "else": {
         "if": {
           "properties": {
-            "ok": {
-              "const": true
+            "action": {
+              "const": "click"
             }
           },
           "required": [
-            "ok"
+            "action"
           ]
         },
         "then": {
-          "required": [
-            "clicked",
-            "raycastHit",
-            "events",
-            "forced"
-          ]
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "clicked"
+                ]
+              },
+              {
+                "required": [
+                  "raycastHit"
+                ]
+              },
+              {
+                "required": [
+                  "events"
+                ]
+              },
+              {
+                "required": [
+                  "forced"
+                ]
+              }
+            ]
+          }
         }
       }
     },
