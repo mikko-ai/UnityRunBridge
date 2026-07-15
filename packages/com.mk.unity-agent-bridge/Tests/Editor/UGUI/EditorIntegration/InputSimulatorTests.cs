@@ -161,6 +161,10 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     Assert.AreEqual(1, lines.Count);
                     StringAssert.DoesNotContain(secret, lines[0]);
                     JsonValue audit = JsonParser.Parse(lines[0]);
+                    Assert.AreEqual("input", audit["action"].AsString);
+                    Assert.IsTrue(audit["ok"].AsBoolean);
+                    Assert.AreEqual("ok", audit["code"].AsString);
+                    Assert.AreEqual(path, audit["request"]["path"].AsString);
                     Assert.AreEqual(secret.Length, audit["request"]["textLength"].AsInt);
 
                     InteractionAuditLog.SetHooksForTests(
@@ -214,7 +218,10 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     Assert.AreEqual(0.75f, slider.value, 0.001f);
                     Assert.AreEqual(1, lines.Count);
                     JsonValue audit = JsonParser.Parse(lines[0]);
+                    Assert.AreEqual("set-value", audit["action"].AsString);
+                    Assert.IsTrue(audit["ok"].AsBoolean);
                     Assert.AreEqual("ok", audit["code"].AsString);
+                    Assert.AreEqual(path, audit["request"]["path"].AsString);
                     Assert.AreEqual("Slider", audit["component"].AsString);
                     Assert.AreEqual("number", audit["request"]["valueKind"].AsString);
                     Assert.AreEqual(0.75, audit["request"]["value"].AsDouble, 0.001);
