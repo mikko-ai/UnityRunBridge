@@ -212,6 +212,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     Assert.IsFalse(response.ContainsKey("code"));
                     Assert.AreEqual("Slider", response["component"].AsString);
                     Assert.AreEqual(0.75f, slider.value, 0.001f);
+                    Assert.AreEqual(1, lines.Count);
                     JsonValue audit = JsonParser.Parse(lines[0]);
                     Assert.AreEqual("ok", audit["code"].AsString);
                     Assert.AreEqual("Slider", audit["component"].AsString);
