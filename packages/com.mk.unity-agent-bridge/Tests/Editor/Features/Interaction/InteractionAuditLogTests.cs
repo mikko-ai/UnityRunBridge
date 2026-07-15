@@ -88,6 +88,17 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             }
         }
 
+        [TestCase("{\"x\":\"1\",\"y\":2}")]
+        [TestCase("{\"x\":1,\"y\":false}")]
+        public void BuildRequestSummary_SetValue_XYObjectWithNonNumber_IsUnknown(string rawValue)
+        {
+            JsonValue request = InteractionAuditLog.BuildRequestSummary(
+                "set-value", JsonParser.Parse("{\"value\":" + rawValue + "}"));
+
+            Assert.AreEqual("unknown", request["valueKind"].AsString);
+            Assert.IsFalse(request.ContainsKey("value"));
+        }
+
         [Test]
         public void BuildRequestSummary_SetValue_MissingValue_IsInvalid()
         {
@@ -164,6 +175,29 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
         }
 
         [Test]
+        public void AppendFromResponse_BridgeResponse_MapsSuccessAndFailure()
+        {
+            List<string> lines = CaptureLines();
+            JsonValue request = InteractionAuditLog.BuildRequestSummary(
+                "input", JsonParser.Parse("{\"path\":\"Main/Input\",\"text\":\"secret\"}"));
+
+            InteractionAuditLog.AppendFromResponse(
+                "input", request, null, BridgeResponse.Success("input_applied", "done"), 1);
+            InteractionAuditLog.AppendFromResponse(
+                "input", request, null, BridgeResponse.Failure("not_interactable", "input disabled"), 2);
+
+            Assert.AreEqual(2, lines.Count);
+            JsonValue success = JsonParser.Parse(lines[0]);
+            Assert.IsTrue(success["ok"].AsBoolean);
+            Assert.AreEqual("ok", success["code"].AsString);
+
+            JsonValue failure = JsonParser.Parse(lines[1]);
+            Assert.IsFalse(failure["ok"].AsBoolean);
+            Assert.AreEqual("not_interactable", failure["code"].AsString);
+            Assert.AreEqual("input disabled", failure["message"].AsString);
+        }
+
+        [Test]
         public void AppendFromResponse_WhenAppenderThrows_LogsWarningAndDoesNotThrow()
         {
             InteractionAuditLog.SetHooksForTests(
@@ -183,7 +217,9 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
         [Test]
         public void AppendFromResponse_WithoutSession_AppendsParseableLineToScratch()
         {
-            SessionService.EndSession();
+            bool hadActiveSession = SessionService.HasActiveSession;
+            string originalSessionId = SessionService.CurrentSessionId;
+            string originalSessionPath = SessionService.CurrentSessionPath;
             string path = Path.Combine(
                 ArtifactPathGuard.GetScratchRoot(ArtifactPathGuard.GetProjectRoot()),
                 "interaction-actions.jsonl");
@@ -192,6 +228,11 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
 
             try
             {
+                if (hadActiveSession)
+                {
+                    SessionService.EndSession();
+                }
+
                 int previousLineCount = CountLines(path);
                 InteractionAuditLog.AppendFromResponse(
                     "input",
@@ -205,13 +246,23 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             }
             finally
             {
-                RestoreFile(path, existed, original);
+                try
+                {
+                    RestoreFile(path, existed, original);
+                }
+                finally
+                {
+                    RestoreSession(hadActiveSession, originalSessionId, originalSessionPath);
+                }
             }
         }
 
         [Test]
         public void AppendFromResponse_WithSession_AppendsParseableLineToSessionArtifacts()
         {
+            bool hadActiveSession = SessionService.HasActiveSession;
+            string originalSessionId = SessionService.CurrentSessionId;
+            string originalSessionPath = SessionService.CurrentSessionPath;
             string projectRoot = ArtifactPathGuard.GetProjectRoot();
             string sessionPath = Path.Combine(
                 ArtifactPathGuard.GetSessionsRoot(projectRoot),
@@ -233,10 +284,16 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             }
             finally
             {
-                SessionService.EndSession();
-                if (Directory.Exists(sessionPath))
+                try
                 {
-                    Directory.Delete(sessionPath, true);
+                    RestoreSession(hadActiveSession, originalSessionId, originalSessionPath);
+                }
+                finally
+                {
+                    if (Directory.Exists(sessionPath))
+                    {
+                        Directory.Delete(sessionPath, true);
+                    }
                 }
             }
         }
@@ -296,6 +353,25 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             {
                 File.Delete(path);
             }
+        }
+
+        private static void RestoreSession(
+            bool hadActiveSession,
+            string originalSessionId,
+            string originalSessionPath)
+        {
+            SessionService.EndSession();
+            if (!hadActiveSession)
+            {
+                return;
+            }
+
+            BridgeResponse restored = SessionService.StartSession(
+                originalSessionId, originalSessionPath);
+            Assert.IsTrue(restored.ok, restored.message);
+            Assert.IsTrue(SessionService.HasActiveSession);
+            Assert.AreEqual(originalSessionId, SessionService.CurrentSessionId);
+            Assert.AreEqual(originalSessionPath, SessionService.CurrentSessionPath);
         }
     }
 }
