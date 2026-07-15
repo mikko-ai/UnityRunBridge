@@ -215,11 +215,29 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
         }
 
         [Test]
+        public void RequireNoActiveSessionForDirectoryTest_WhenActive_ThrowsIgnoreBeforeContinuing()
+        {
+            bool continued = false;
+
+            Assert.Throws<IgnoreException>(() =>
+            {
+                RequireNoActiveSessionForDirectoryTest(true);
+                continued = true;
+            });
+
+            Assert.IsFalse(continued);
+        }
+
+        [Test]
+        public void RequireNoActiveSessionForDirectoryTest_WhenInactive_DoesNotThrow()
+        {
+            Assert.DoesNotThrow(() => RequireNoActiveSessionForDirectoryTest(false));
+        }
+
+        [Test]
         public void AppendFromResponse_WithoutSession_AppendsParseableLineToScratch()
         {
-            bool hadActiveSession = SessionService.HasActiveSession;
-            string originalSessionId = SessionService.CurrentSessionId;
-            string originalSessionPath = SessionService.CurrentSessionPath;
+            RequireNoActiveSessionForDirectoryTest(SessionService.HasActiveSession);
             string path = Path.Combine(
                 ArtifactPathGuard.GetScratchRoot(ArtifactPathGuard.GetProjectRoot()),
                 "interaction-actions.jsonl");
@@ -228,11 +246,6 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
 
             try
             {
-                if (hadActiveSession)
-                {
-                    SessionService.EndSession();
-                }
-
                 int previousLineCount = CountLines(path);
                 InteractionAuditLog.AppendFromResponse(
                     "input",
@@ -246,32 +259,27 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             }
             finally
             {
-                try
-                {
-                    RestoreFile(path, existed, original);
-                }
-                finally
-                {
-                    RestoreSession(hadActiveSession, originalSessionId, originalSessionPath);
-                }
+                RestoreFile(path, existed, original);
             }
         }
 
         [Test]
         public void AppendFromResponse_WithSession_AppendsParseableLineToSessionArtifacts()
         {
-            bool hadActiveSession = SessionService.HasActiveSession;
-            string originalSessionId = SessionService.CurrentSessionId;
-            string originalSessionPath = SessionService.CurrentSessionPath;
+            RequireNoActiveSessionForDirectoryTest(SessionService.HasActiveSession);
             string projectRoot = ArtifactPathGuard.GetProjectRoot();
             string sessionPath = Path.Combine(
                 ArtifactPathGuard.GetSessionsRoot(projectRoot),
                 "interaction-audit-test-" + Guid.NewGuid().ToString("N"));
             string path = Path.Combine(sessionPath, "artifacts", "interaction-actions.jsonl");
+            bool testSessionStarted = false;
 
             try
             {
-                Assert.IsTrue(SessionService.StartSession("interaction-audit-test", sessionPath).ok);
+                BridgeResponse started = SessionService.StartSession(
+                    "interaction-audit-test", sessionPath);
+                testSessionStarted = started.ok;
+                Assert.IsTrue(started.ok, started.message);
                 InteractionAuditLog.AppendFromResponse(
                     "click",
                     InteractionAuditLog.BuildRequestSummary("click", JsonParser.Parse("{\"path\":\"Main/Button\"}")),
@@ -286,7 +294,10 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             {
                 try
                 {
-                    RestoreSession(hadActiveSession, originalSessionId, originalSessionPath);
+                    if (testSessionStarted)
+                    {
+                        SessionService.EndSession();
+                    }
                 }
                 finally
                 {
@@ -355,23 +366,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             }
         }
 
-        private static void RestoreSession(
-            bool hadActiveSession,
-            string originalSessionId,
-            string originalSessionPath)
+        private static void RequireNoActiveSessionForDirectoryTest(bool hasActiveSession)
         {
-            SessionService.EndSession();
-            if (!hadActiveSession)
+            if (hasActiveSession)
             {
-                return;
+                Assert.Ignore("真实目录测试要求无活动 session，避免破坏 sequence/runIndex");
             }
-
-            BridgeResponse restored = SessionService.StartSession(
-                originalSessionId, originalSessionPath);
-            Assert.IsTrue(restored.ok, restored.message);
-            Assert.IsTrue(SessionService.HasActiveSession);
-            Assert.AreEqual(originalSessionId, SessionService.CurrentSessionId);
-            Assert.AreEqual(originalSessionPath, SessionService.CurrentSessionPath);
         }
     }
 }
