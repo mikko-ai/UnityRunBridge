@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Mk.UnityAgentBridge.Editor.Interaction;
 using Mk.UnityAgentBridge.Editor.Json;
 using Mk.UnityAgentBridge.Editor.Routing;
@@ -7,6 +9,25 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
 {
     public sealed class InteractionControllerTests
     {
+        private const string SecretInput = "do-not-log-this-secret";
+        private List<string> auditLines;
+
+        [SetUp]
+        public void SetUp()
+        {
+            auditLines = new List<string>();
+            InteractionAuditLog.SetHooksForTests(
+                () => "/virtual/artifacts",
+                (_, text) => auditLines.Add(text));
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            InteractionController.ResetForTests();
+            InteractionAuditLog.ResetForTests();
+        }
+
         private static bool HasInteractionCapability()
         {
             foreach (string capability in CapabilityRegistry.All())
@@ -108,6 +129,65 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
 
             Assert.IsInstanceOf<BridgeResponse>(result);
             Assert.AreEqual("not_in_play_mode", ((BridgeResponse)result).code);
+        }
+
+        [TestCase("click", "{}")]
+        [TestCase("input", "{\"text\":\"do-not-log-this-secret\"}")]
+        [TestCase("set-value", "{\"value\":1}")]
+        public void MissingPath_AuditsInvalidArgument(string action, string rawBody)
+        {
+            AssertAuditedFailure(action, rawBody, "invalid_argument");
+        }
+
+        [TestCase("click", "{\"path\":\"Foo\"}")]
+        [TestCase("input", "{\"path\":\"Foo\",\"text\":\"do-not-log-this-secret\"}")]
+        [TestCase("set-value", "{\"path\":\"Foo\",\"value\":1}")]
+        public void Idle_AuditsNotInPlayMode(string action, string rawBody)
+        {
+            AssertAuditedFailure(action, rawBody, "not_in_play_mode");
+        }
+
+        [TestCase("click", "{\"path\":\"Missing\"}")]
+        [TestCase("input", "{\"path\":\"Missing\",\"text\":\"do-not-log-this-secret\"}")]
+        [TestCase("set-value", "{\"path\":\"Missing\",\"value\":1}")]
+        public void PlayingWithMissingNode_AuditsNodeNotFound(string action, string rawBody)
+        {
+            InteractionController.SetPlayModeStateProviderForTests(() => "playing");
+
+            AssertAuditedFailure(action, rawBody, "node_not_found");
+        }
+
+        private void AssertAuditedFailure(string action, string rawBody, string expectedCode)
+        {
+            int before = auditLines.Count;
+            object result = Invoke(action, rawBody);
+
+            Assert.AreEqual(before + 1, auditLines.Count);
+            JsonValue audit = JsonParser.Parse(auditLines[before]);
+            Assert.AreEqual(action, audit["action"].AsString);
+            Assert.IsFalse(audit["ok"].AsBoolean);
+            Assert.AreEqual(expectedCode, audit["code"].AsString);
+            Assert.AreEqual(expectedCode, ((BridgeResponse)result).code);
+            if (action == "input")
+            {
+                StringAssert.DoesNotContain(SecretInput, auditLines[before]);
+            }
+        }
+
+        private static object Invoke(string action, string rawBody)
+        {
+            BridgeRequestContext context = BridgeRequestContext.ForTests(rawBody: rawBody);
+            switch (action)
+            {
+                case "click":
+                    return InteractionController.Click(context);
+                case "input":
+                    return InteractionController.Input(context);
+                case "set-value":
+                    return InteractionController.SetValue(context);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(action));
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics;
 using Mk.UnityAgentBridge.Editor.Contracts;
 using Mk.UnityAgentBridge.Editor.Hierarchy;
 using Mk.UnityAgentBridge.Editor.Json;
@@ -13,29 +15,39 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
     /// </summary>
     internal static class InteractionController
     {
+        private static Func<string> playModeStateProvider = DeriveEditorState;
+
         internal static object Click(BridgeRequestContext ctx, IBridgeServiceResolver services = null)
         {
-            services = BridgeServices.Current(services);
+            Stopwatch stopwatch = Stopwatch.StartNew();
             JsonValue body = ctx.Body;
+            JsonValue request = InteractionAuditLog.BuildRequestSummary("click", body);
+            string scene = body != null && body.TryGetString("scene", out string sceneValue)
+                ? sceneValue
+                : null;
             if (body == null || !body.TryGetString("path", out string path))
             {
-                return BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path");
+                return AuditAndReturn(
+                    "click", request, scene,
+                    BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path"), stopwatch);
             }
 
             bool force = body.GetBoolean("force", false);
-            string scene = body.TryGetString("scene", out string sceneValue) ? sceneValue : null;
 
             if (!TryValidatePlayMode(out BridgeResponse gate))
             {
-                return gate;
+                return AuditAndReturn("click", request, scene, gate, stopwatch);
             }
 
             NodePath.ResolveResult resolved = NodePath.Resolve(path, scene);
             if (!resolved.Ok)
             {
-                return BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage);
+                return AuditAndReturn(
+                    "click", request, scene,
+                    BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage), stopwatch);
             }
 
+            services = BridgeServices.Current(services);
             PointerSimulator.ClickResult result = PointerSimulator.SimulateClick(
                 resolved.Node.gameObject, force, services);
             if (!result.Ok)
@@ -48,10 +60,10 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                     occludedJson["code"] = result.ErrorCode;
                     occludedJson["message"] = result.ErrorMessage;
                     occludedJson["blockedBy"] = NodePath.BuildPath(result.RaycastHit.transform);
-                    return occludedJson;
+                    return AuditAndReturn("click", request, scene, occludedJson, stopwatch);
                 }
 
-                return failure;
+                return AuditAndReturn("click", request, scene, failure, stopwatch);
             }
 
             JsonValue response = JsonValue.NewObject();
@@ -68,78 +80,99 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             }
 
             response["events"] = eventsArray;
-            return response;
+            return AuditAndReturn("click", request, scene, response, stopwatch);
         }
 
         internal static object Input(BridgeRequestContext ctx, IBridgeServiceResolver services = null)
         {
-            services = BridgeServices.Current(services);
+            Stopwatch stopwatch = Stopwatch.StartNew();
             JsonValue body = ctx.Body;
+            JsonValue request = InteractionAuditLog.BuildRequestSummary("input", body);
+            string scene = body != null && body.TryGetString("scene", out string sceneValue)
+                ? sceneValue
+                : null;
             if (body == null || !body.TryGetString("path", out string path))
             {
-                return BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path");
+                return AuditAndReturn(
+                    "input", request, scene,
+                    BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path"), stopwatch);
             }
 
             string text = body.TryGetString("text", out string textValue) ? textValue : string.Empty;
             bool submit = body.GetBoolean("submit", false);
-            string scene = body.TryGetString("scene", out string sceneValue) ? sceneValue : null;
 
             if (!TryValidatePlayMode(out BridgeResponse gate))
             {
-                return gate;
+                return AuditAndReturn("input", request, scene, gate, stopwatch);
             }
 
             NodePath.ResolveResult resolved = NodePath.Resolve(path, scene);
             if (!resolved.Ok)
             {
-                return BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage);
+                return AuditAndReturn(
+                    "input", request, scene,
+                    BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage), stopwatch);
             }
 
+            services = BridgeServices.Current(services);
             InputSimulator.OperationResult result = InputSimulator.SetText(
                 resolved.Node.gameObject, text, submit, services);
             if (!result.Ok)
             {
-                return BridgeResponse.Failure(result.ErrorCode, result.ErrorMessage);
+                return AuditAndReturn(
+                    "input", request, scene,
+                    BridgeResponse.Failure(result.ErrorCode, result.ErrorMessage), stopwatch);
             }
 
-            return BridgeResponse.Success("ok", "input applied");
+            return AuditAndReturn(
+                "input", request, scene, BridgeResponse.Success("ok", "input applied"), stopwatch);
         }
 
         internal static object SetValue(BridgeRequestContext ctx, IBridgeServiceResolver services = null)
         {
-            services = BridgeServices.Current(services);
+            Stopwatch stopwatch = Stopwatch.StartNew();
             JsonValue body = ctx.Body;
+            JsonValue request = InteractionAuditLog.BuildRequestSummary("set-value", body);
+            string scene = body != null && body.TryGetString("scene", out string sceneValue)
+                ? sceneValue
+                : null;
             if (body == null || !body.TryGetString("path", out string path))
             {
-                return BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path");
+                return AuditAndReturn(
+                    "set-value", request, scene,
+                    BridgeResponse.Failure("invalid_argument", "body 必须包含字符串字段 path"), stopwatch);
             }
 
             string component = body.TryGetString("component", out string componentValue) ? componentValue : null;
-            string scene = body.TryGetString("scene", out string sceneValue) ? sceneValue : null;
             JsonValue value = body.TryGet("value", out JsonValue valueItem) ? valueItem : null;
 
             if (!TryValidatePlayMode(out BridgeResponse gate))
             {
-                return gate;
+                return AuditAndReturn("set-value", request, scene, gate, stopwatch);
             }
 
             NodePath.ResolveResult resolved = NodePath.Resolve(path, scene);
             if (!resolved.Ok)
             {
-                return BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage);
+                return AuditAndReturn(
+                    "set-value", request, scene,
+                    BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage), stopwatch);
             }
 
+            services = BridgeServices.Current(services);
             InputSimulator.OperationResult result = InputSimulator.SetValue(
                 resolved.Node.gameObject, component, value, services);
             if (!result.Ok)
             {
-                return BridgeResponse.Failure(result.ErrorCode, result.ErrorMessage);
+                return AuditAndReturn(
+                    "set-value", request, scene,
+                    BridgeResponse.Failure(result.ErrorCode, result.ErrorMessage), stopwatch);
             }
 
             JsonValue response = JsonValue.NewObject();
             response["ok"] = true;
             response["component"] = result.ComponentType;
-            return response;
+            return AuditAndReturn("set-value", request, scene, response, stopwatch);
         }
 
         /// <summary>抽成纯函数（接收当前 editorState）便于 EditMode 测试覆盖三种拒绝分支，不依赖真实 Play Mode。</summary>
@@ -157,14 +190,39 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
 
         private static bool TryValidatePlayMode(out BridgeResponse rejection)
         {
-            string editorState = EditorStateProvider.DeriveState(
+            return ValidatePlayModeState(playModeStateProvider(), out rejection);
+        }
+
+        private static string DeriveEditorState()
+        {
+            return EditorStateProvider.DeriveState(
                 EditorApplication.isCompiling,
                 EditorApplication.isUpdating,
                 EditorApplication.isPlaying,
                 EditorApplication.isPaused,
                 EditorApplication.isPlayingOrWillChangePlaymode);
+        }
 
-            return ValidatePlayModeState(editorState, out rejection);
+        private static object AuditAndReturn(
+            string action,
+            JsonValue request,
+            string scene,
+            object response,
+            Stopwatch stopwatch)
+        {
+            InteractionAuditLog.AppendFromResponse(
+                action, request, scene, response, stopwatch.ElapsedMilliseconds);
+            return response;
+        }
+
+        internal static void SetPlayModeStateProviderForTests(Func<string> provider)
+        {
+            playModeStateProvider = provider ?? DeriveEditorState;
+        }
+
+        internal static void ResetForTests()
+        {
+            playModeStateProvider = DeriveEditorState;
         }
     }
 }
