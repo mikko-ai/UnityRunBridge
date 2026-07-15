@@ -92,10 +92,14 @@ def validate_record(record: object) -> list[str]:
         "blockedBy",
     } & record.keys():
         errors.append("click-only result field")
-    if record.get("code") == "occluded" and not record.get("blockedBy"):
-        errors.append("occluded requires blockedBy")
-    if record.get("code") != "occluded" and "blockedBy" in record:
-        errors.append("blockedBy only allowed for occluded")
+    if record.get("code") == "occluded" and (
+        action != "click" or not record.get("blockedBy")
+    ):
+        errors.append("occluded requires click action and blockedBy")
+    if "blockedBy" in record and (
+        action != "click" or record.get("code") != "occluded"
+    ):
+        errors.append("blockedBy only allowed for occluded click")
     if action == "set-value" and record.get("ok") is True:
         if not record.get("component"):
             errors.append("set-value success requires component")
@@ -159,10 +163,159 @@ def _base_record(**overrides: object) -> dict[str, object]:
     return record
 
 
+def _load_root_schema() -> dict[str, object]:
+    root_schema, _ = _schema_paths()
+    return json.loads(root_schema.read_text(encoding="utf-8"))
+
+
+def _action_request_branch(
+    schema: dict[str, object], action: str
+) -> dict[str, object]:
+    for branch in schema["allOf"]:
+        condition = branch.get("if", {})
+        if condition.get("properties", {}).get("action") == {"const": action}:
+            request = branch.get("then", {}).get("properties", {}).get("request")
+            if request is not None:
+                return branch
+    raise AssertionError(f"missing request branch for action: {action}")
+
+
 def test_interaction_audit_schema_is_distributed_byte_for_byte():
     root_schema, bundled_schema = _schema_paths()
 
     assert root_schema.read_bytes() == bundled_schema.read_bytes()
+
+
+def test_interaction_audit_schema_contains_all_contract_conditions():
+    schema = _load_root_schema()
+
+    expected_requests = {
+        "click": {
+            "required": {"force"},
+            "properties": {"path", "force"},
+            "property_schemas": {"force": {"type": "boolean"}},
+        },
+        "input": {
+            "required": {"submit"},
+            "properties": {"path", "textLength", "submit"},
+            "property_schemas": {
+                "textLength": {"type": "integer", "minimum": 0},
+                "submit": {"type": "boolean"},
+            },
+        },
+        "set-value": {
+            "required": {"valueKind"},
+            "properties": {
+                "path",
+                "component",
+                "valueKind",
+                "value",
+                "valueLength",
+            },
+            "property_schemas": {
+                "valueLength": {"type": "integer", "minimum": 0},
+            },
+        },
+    }
+    action_branches = {
+        action: _action_request_branch(schema, action)
+        for action in expected_requests
+    }
+    for action, expected in expected_requests.items():
+        request = action_branches[action]["then"]["properties"]["request"]
+        assert request["type"] == "object"
+        assert request["additionalProperties"] is False
+        assert set(request["required"]) == expected["required"]
+        assert set(request["properties"]) == expected["properties"]
+        for property_name, property_schema in expected["property_schemas"].items():
+            assert request["properties"][property_name] == property_schema
+
+    all_of = schema["allOf"]
+    path_branch = next(
+        branch
+        for branch in all_of
+        if branch.get("if", {}).get("properties", {}).get("code")
+        == {"not": {"const": "invalid_argument"}}
+    )
+    path_request = path_branch["then"]["properties"]["request"]
+    assert path_request["required"] == ["path"]
+    assert path_request["properties"]["path"] == {
+        "type": "string",
+        "minLength": 1,
+    }
+
+    success_branch = next(
+        branch
+        for branch in all_of
+        if branch.get("if", {}).get("properties", {}).get("ok") == {"const": True}
+    )
+    assert success_branch["then"]["properties"]["code"] == {"const": "ok"}
+    assert success_branch["then"]["not"] == {"required": ["message"]}
+
+    occluded_branch = next(
+        branch
+        for branch in all_of
+        if branch.get("if", {}).get("properties", {}).get("code")
+        == {"const": "occluded"}
+    )
+    assert occluded_branch["if"]["required"] == ["code"]
+    assert occluded_branch["then"]["required"] == ["blockedBy"]
+    assert occluded_branch["then"]["properties"]["action"] == {"const": "click"}
+    assert occluded_branch["else"]["not"] == {"required": ["blockedBy"]}
+
+    set_value_then = action_branches["set-value"]["then"]
+    value_kind_conditions = set_value_then["allOf"]
+    typed_kinds = {
+        condition["if"]["properties"]["request"]["properties"]["valueKind"].get(
+            "const"
+        ): condition
+        for condition in value_kind_conditions
+        if "const"
+        in condition["if"]["properties"]["request"]["properties"]["valueKind"]
+    }
+    assert set(typed_kinds) == {"number", "boolean", "object"}
+    for kind, value_type in {
+        "number": "number",
+        "boolean": "boolean",
+        "object": "object",
+    }.items():
+        request = typed_kinds[kind]["then"]["properties"]["request"]
+        assert request["required"] == ["value"]
+        assert request["properties"]["value"]["type"] == value_type
+    object_value = typed_kinds["object"]["then"]["properties"]["request"][
+        "properties"
+    ]["value"]
+    assert object_value["additionalProperties"] is False
+    assert set(object_value["required"]) == {"x", "y"}
+    assert object_value["properties"] == {
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+    }
+    redacted_condition = next(
+        condition
+        for condition in value_kind_conditions
+        if condition["if"]["properties"]["request"]["properties"]["valueKind"].get(
+            "enum"
+        )
+    )
+    assert set(
+        redacted_condition["if"]["properties"]["request"]["properties"]["valueKind"][
+            "enum"
+        ]
+    ) == {"string", "unknown", "invalid"}
+    assert redacted_condition["then"]["properties"]["request"]["not"] == {
+        "required": ["value"]
+    }
+
+    component_branch = next(
+        branch
+        for branch in all_of
+        if branch.get("if", {}).get("properties")
+        == {"action": {"const": "set-value"}, "ok": {"const": True}}
+    )
+    assert set(component_branch["if"]["required"]) == {"action", "ok"}
+    assert component_branch["then"]["required"] == ["component"]
+    assert component_branch["else"]["not"] == {"required": ["component"]}
 
 
 def test_validate_record_accepts_expected_success_cases():
@@ -181,7 +334,7 @@ def test_validate_record_accepts_expected_success_cases():
         {
             **_base_record(
                 action="input",
-                request={"path": "Canvas/InputField", "textLength": 11, "submit": True},
+                request={"textLength": 11, "submit": True},
             ),
             "ok": False,
             "code": "invalid_argument",
@@ -214,25 +367,157 @@ def test_validate_record_accepts_expected_success_cases():
 @pytest.mark.parametrize(
     "record",
     [
-        None,
-        {"time": "2026-07-15T15:14:00Z"},
-        {**_base_record(), "extra": True},
-        {**_base_record(), "ok": "yes"},
-        {**_base_record(), "request": "bad"},
-        {**_base_record(), "request": {"path": "Canvas/Button", "force": False, "text": "bad"}},
-        {
-            **_base_record(action="input", request={"textLength": 2}),
-            "ok": False,
-            "code": "invalid_argument",
-        },
-        {
-            **_base_record(
-                action="set-value",
-                request={"path": "Canvas/Slider", "valueKind": "number", "value": "0.75"},
+        pytest.param(
+            {key: value for key, value in _base_record().items() if key != "time"},
+            id="missing-common-field",
+        ),
+        pytest.param(
+            _base_record(action="drag"),
+            id="invalid-action",
+        ),
+        pytest.param(
+            _base_record(request={"force": False}),
+            id="ok-true-missing-path",
+        ),
+        pytest.param(
+            _base_record(
+                ok=False,
+                code="occluded",
+                request={"force": False},
+                blockedBy="Overlay",
             ),
-            "ok": True,
-            "code": "ok",
-        },
+            id="occluded-missing-path",
+        ),
+        pytest.param(
+            _base_record(
+                ok=False,
+                code="no_click_handler",
+                request={"force": False},
+            ),
+            id="no-click-handler-missing-path",
+        ),
+        pytest.param(
+            _base_record(ok=False, code="node_not_found", request={"force": False}),
+            id="node-not-found-missing-path",
+        ),
+        pytest.param(
+            _base_record(ok=False, code="not_interactable", request={"force": False}),
+            id="not-interactable-missing-path",
+        ),
+        pytest.param(
+            _base_record(
+                action="input",
+                request={
+                    "path": "Canvas/Input",
+                    "textLength": 6,
+                    "submit": False,
+                    "secret": "hidden",
+                },
+            ),
+            id="request-extra-key",
+        ),
+        pytest.param(
+            _base_record(
+                action="input",
+                request={
+                    "path": "Canvas/Input",
+                    "textLength": 6,
+                    "submit": False,
+                    "text": "secret",
+                },
+            ),
+            id="input-text-forbidden",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={"path": "Canvas/Label", "value": "secret"},
+            ),
+            id="set-value-string-missing-kind",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={
+                    "path": "Canvas/Label",
+                    "valueKind": "number",
+                    "value": "secret",
+                },
+            ),
+            id="set-value-string-wrong-kind",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={
+                    "path": "Canvas/Label",
+                    "valueKind": "string",
+                    "value": "secret",
+                },
+            ),
+            id="set-value-string-kind-with-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={"path": "Canvas/Slider", "valueKind": "number"},
+            ),
+            id="typed-number-missing-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={"path": "Canvas/Toggle", "valueKind": "boolean"},
+            ),
+            id="typed-boolean-missing-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={"path": "Canvas/Position", "valueKind": "object"},
+            ),
+            id="typed-object-missing-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={
+                    "path": "Canvas/Position",
+                    "valueKind": "object",
+                    "value": {"payload": {"secret": "nested"}},
+                },
+            ),
+            id="nested-object-masquerading-as-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="set-value",
+                request={
+                    "path": "Canvas/Position",
+                    "valueKind": "object",
+                    "value": ["secret"],
+                },
+            ),
+            id="array-masquerading-as-value",
+        ),
+        pytest.param(
+            _base_record(
+                action="input",
+                ok=False,
+                code="occluded",
+                request={"path": "Canvas/Input", "textLength": 1, "submit": False},
+                blockedBy="Overlay",
+            ),
+            id="blocked-by-on-non-click-occluded",
+        ),
+        pytest.param(
+            _base_record(
+                ok=False,
+                code="node_not_found",
+                blockedBy="Overlay",
+            ),
+            id="blocked-by-on-non-occluded-code",
+        ),
     ],
 )
 def test_validate_record_rejects_contract_errors(record: object):

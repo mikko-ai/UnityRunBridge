@@ -143,7 +143,12 @@
       "then": {
         "required": [
           "blockedBy"
-        ]
+        ],
+        "properties": {
+          "action": {
+            "const": "click"
+          }
+        }
       },
       "else": {
         "not": {
@@ -229,6 +234,42 @@
             "events",
             "forced"
           ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "input"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "submit"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "textLength": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "submit": {
+                "type": "boolean"
+              }
+            }
+          }
         }
       }
     },
