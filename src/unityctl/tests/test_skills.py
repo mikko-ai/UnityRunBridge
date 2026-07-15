@@ -275,12 +275,45 @@ def test_real_assets_install(tmp_path, capsys):
     ).read_text(encoding="utf-8")
     assert "禁止从截图像素坐标推导点击目标" in interaction_md
     assert "path` 或 `instanceId" in interaction_md
-    assert "自适应探索闭环" in interaction_md
-    assert "三级证据" in interaction_md
-    assert "不能宣称" in interaction_md
-    assert "一次性长 shell/Python" in interaction_md
-    assert "interaction-actions.jsonl" in interaction_md
-    assert "local path=" in interaction_md
+    assert (
+        "用 `hierarchy find` / `tree` / `inspect` 消歧为唯一 `path` 或 `instanceId`。"
+        in interaction_md
+    )
+    assert (
+        "直接执行一条 `unityctl ...`，不要把未知多步流程打包成一次性长 shell/Python。"
+        in interaction_md
+    )
+    assert (
+        "保留完整 JSON 回执；需要复盘时对照当前 session 的 "
+        "`artifacts/interaction-actions.jsonl`"
+        in interaction_md
+    )
+    assert "用 hierarchy / gameplay / log 验证预期业务变化。" in interaction_md
+    assert "必要时截图理解或复核画面，但不得由像素推导点击目标。" in interaction_md
+    assert (
+        "根据验证结果再决策；`occluded` 时先读取并处理 `blockedBy`。"
+        in interaction_md
+    )
+    assert "已知、稳定、可复跑的流程使用官方 `unityctl scenario`。" in interaction_md
+    assert (
+        "只有 L3 能宣称界面或业务成功；L1、L2 只能说明命令或适配器层已执行。"
+        in interaction_md
+    )
+    assert "L1：命令到达且未被参数/能力门拒绝，不能宣称成功。" in interaction_md
+    assert (
+        "L2：`click` 的 `clicked`/`events`，或 `input`/`set-value` 对应 adapter "
+        "已接受并应用，仍不能宣称业务成功。"
+        in interaction_md
+    )
+    assert "未知探索使用一次性长 shell/Python。" in interaction_md
+    assert "`|| true` 吞错。" in interaction_md
+    assert 'grep `"clicked"` 代替 JSON 语义。' in interaction_md
+    assert "无观测空等。" in interaction_md
+    assert "截图像素/欧氏距离选最近按钮。" in interaction_md
+    assert "path 含 `[index]` 时不加引号。" in interaction_md
+    assert (
+        "zsh 函数使用 `local path=`，因为会绑定并破坏 `PATH`。" in interaction_md
+    )
     assert (
         project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
     ).exists()

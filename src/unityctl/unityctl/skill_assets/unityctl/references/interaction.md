@@ -47,6 +47,8 @@ unityctl snapshot --max-long-edge 800                # 单次覆盖输出长边�
 5. 必要时截图理解或复核画面，但不得由像素推导点击目标。
 6. 根据验证结果再决策；`occluded` 时先读取并处理 `blockedBy`。
 
+已知、稳定、可复跑的流程使用官方 `unityctl scenario`。
+
 ### 三级证据
 
 - L1：命令到达且未被参数/能力门拒绝，不能宣称成功。
