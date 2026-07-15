@@ -141,6 +141,8 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     "PointerSimulatorTests_ControllerClickable",
                     new Vector2(100, 100),
                     new Vector2(200, 60));
+                int clickCount = 0;
+                button.onClick.AddListener(() => clickCount++);
                 List<string> lines = new List<string>();
 
                 try
@@ -158,6 +160,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
                     JsonValue response = (JsonValue)raw;
 
                     Assert.IsTrue(response["ok"].AsBoolean);
+                    Assert.AreEqual(1, clickCount);
                     Assert.IsFalse(response.ContainsKey("code"));
                     Assert.AreEqual(path, response["clicked"].AsString);
                     Assert.AreEqual(1, lines.Count);
