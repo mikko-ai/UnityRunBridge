@@ -60,4 +60,51 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
             Adapter = adapter;
         }
     }
+
+    /// <summary>
+    /// UI 标注元素 DTO：屏幕坐标使用 Unity 左下原点（与 hierarchy screenRect 一致）。
+    /// Features 标注渲染器只消费这些字段，不接触 UGUI 类型。
+    /// </summary>
+    public sealed class UiAnnotationElement
+    {
+        public string Label;
+        public string Name;
+        public string Path;
+        public string Type;
+        public string Interaction;
+        public float ScreenX;
+        public float ScreenY;
+        public float BoundsMinX;
+        public float BoundsMinY;
+        public float BoundsMaxX;
+        public float BoundsMaxY;
+        public bool Interactable;
+        public int SortingOrder;
+        public int SiblingIndex;
+    }
+
+    /// <summary>UI 射线命中条目（深度越小越靠前）。</summary>
+    public sealed class UiHitResult
+    {
+        public string Path;
+        public string Name;
+        public int Depth;
+        public string Module;
+        public int SortingOrder;
+        public float Distance;
+        public GameObject GameObject;
+    }
+
+    /// <summary>跨帧手势会话：Backend 持有内部状态，Features Runner 只读 Result/Events。</summary>
+    public sealed class InteractionGestureSession
+    {
+        public string Kind;
+        public bool Completed;
+        public InteractionOperationResult Result;
+        public List<string> Events = new List<string>();
+        public Vector2 StartScreenPoint;
+        public Vector2 EndScreenPoint;
+        public float DurationSeconds;
+        public object State;
+    }
 }

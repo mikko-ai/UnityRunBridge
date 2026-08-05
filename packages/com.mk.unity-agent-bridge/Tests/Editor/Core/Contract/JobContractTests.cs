@@ -98,6 +98,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             Assert.IsTrue(BridgeErrorCodes.IsRegistered("no_input_backend"));
             Assert.IsTrue(BridgeErrorCodes.IsRegistered("already_recording"));
             Assert.IsTrue(BridgeErrorCodes.IsRegistered("already_profiling"));
+            Assert.IsTrue(BridgeErrorCodes.IsRegistered("interaction_busy"));
+            Assert.IsTrue(BridgeErrorCodes.IsRegistered("bridge_capability_missing"));
+            Assert.IsTrue(BridgeErrorCodes.IsRegistered("cancelled"));
+            Assert.AreEqual(409, BridgeErrorCodes.ResolveHttpStatus("interaction_busy"));
+            Assert.AreEqual(422, BridgeErrorCodes.ResolveHttpStatus("bridge_capability_missing"));
+            Assert.AreEqual(409, BridgeErrorCodes.ResolveHttpStatus("cancelled"));
         }
     }
 }

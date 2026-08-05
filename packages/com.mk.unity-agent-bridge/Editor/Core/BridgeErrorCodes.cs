@@ -56,6 +56,9 @@ namespace Mk.UnityAgentBridge.Editor
             ["unsupported_signature"] = 422,
             ["already_recording"] = 409,
             ["no_input_backend"] = 422,
+            ["interaction_busy"] = 409,
+            ["bridge_capability_missing"] = 422,
+            ["cancelled"] = 409,
 
             // Phase 4：profiling / build / health
             ["already_profiling"] = 409,

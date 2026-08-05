@@ -20,6 +20,37 @@ class BridgeUnreachableError(BridgeClientError):
         super().__init__(message, code="bridge_unreachable")
 
 
+def require_bridge_route(client: Any, capability: str, method: str, path: str) -> None:
+    """校验 capability，并在 Bridge 提供 routes 元数据时进一步校验具体路由。
+
+    旧 Bridge 可能只返回 capability 列表；缺少 routes 字段时保留原有兼容行为，
+    让实际请求决定是否支持。若 routes 明确存在，则缺少新路由视为能力缺失。
+    """
+    response = client.get_capabilities()
+    capabilities = response.get("capabilities", [])
+    if capability not in capabilities:
+        raise BridgeClientError(
+            f"缺少 {capability} 能力，请检查可选依赖或 Bridge 版本",
+            code="bridge_capability_missing",
+        )
+
+    routes = response.get("routes")
+    if routes is None:
+        return
+
+    expected_method = method.upper()
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        if str(route.get("method", "")).upper() == expected_method and route.get("path") == path:
+            return
+
+    raise BridgeClientError(
+        f"当前 Bridge 未注册 {expected_method} {path}，请升级 Bridge 版本",
+        code="bridge_capability_missing",
+    )
+
+
 @dataclass(frozen=True)
 class BridgeClient:
     base_url: str
@@ -154,6 +185,7 @@ class BridgeClient:
         reason: str | None = None,
         max_long_edge: int | None = None,
         target_directory: str | None = None,
+        annotate: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if reason is not None:
@@ -162,7 +194,64 @@ class BridgeClient:
             payload["maxLongEdge"] = max_long_edge
         if target_directory is not None:
             payload["targetDirectory"] = target_directory
+        if annotate:
+            payload["annotate"] = True
         return self.post("capture/screenshot", payload)
+
+    def capture_hit_test(
+        self,
+        x: float,
+        y: float,
+        image_width: float,
+        image_height: float,
+    ) -> dict[str, Any]:
+        return self.post(
+            "capture/hit-test",
+            {
+                "x": x,
+                "y": y,
+                "imageWidth": image_width,
+                "imageHeight": image_height,
+            },
+        )
+
+    def interaction_long_press(
+        self,
+        path: str,
+        duration_seconds: float = 0.5,
+        force: bool = False,
+        scene: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "path": path,
+            "durationSeconds": duration_seconds,
+            "force": force,
+        }
+        if scene is not None:
+            payload["scene"] = scene
+        return self.post("interaction/long-press", payload)
+
+    def interaction_drag(
+        self,
+        path: str,
+        delta_x: float,
+        delta_y: float,
+        duration_seconds: float = 0.3,
+        steps: int = 8,
+        force: bool = False,
+        scene: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "path": path,
+            "deltaX": delta_x,
+            "deltaY": delta_y,
+            "durationSeconds": duration_seconds,
+            "steps": steps,
+            "force": force,
+        }
+        if scene is not None:
+            payload["scene"] = scene
+        return self.post("interaction/drag", payload)
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = self._url(path, params)

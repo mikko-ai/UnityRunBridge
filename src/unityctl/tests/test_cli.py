@@ -84,18 +84,51 @@ class FakeClient:
             ],
         }
 
-    def capture_screenshot(self, reason=None, max_long_edge=None, target_directory=None):
+    def capture_screenshot(self, reason=None, max_long_edge=None, target_directory=None, annotate=False):
         self.calls.append(
             (
                 "capture/screenshot",
-                {"reason": reason, "maxLongEdge": max_long_edge, "targetDirectory": target_directory},
+                {
+                    "reason": reason,
+                    "maxLongEdge": max_long_edge,
+                    "targetDirectory": target_directory,
+                    "annotate": annotate,
+                },
             )
         )
+        result = {"path": "/tmp/fake-shot.png", "width": 100, "height": 80}
+        if annotate:
+            result.update(
+                {
+                    "annotatedPath": "/tmp/fake-shot.annotated.png",
+                    "annotationsPath": "/tmp/fake-shot.annotations.json",
+                    "coordinateSpace": "image-top-left",
+                    "scale": 1.0,
+                    "annotationMeta": {"uguiAvailable": True, "elementCount": 1, "schemaVersion": 1},
+                }
+            )
+        self._last_capture_result = result
         return {"ok": True, "jobId": "job-fake-1"}
+
+    def capture_hit_test(self, x, y, image_width, image_height):
+        self.calls.append(
+            (
+                "capture/hit-test",
+                {"x": x, "y": y, "imageWidth": image_width, "imageHeight": image_height},
+            )
+        )
+        return {
+            "ok": True,
+            "ugui": {"available": True, "hits": []},
+            "physics3d": {"cameraAvailable": False, "hits": []},
+        }
 
     def get_job(self, job_id):
         self.calls.append(("get_job", job_id))
-        return {"job": {"id": job_id, "status": "succeeded", "result": {"path": "/tmp/fake-shot.png"}}}
+        result = getattr(self, "_last_capture_result", {"path": "/tmp/fake-shot.png"})
+        if job_id.startswith("job-gesture"):
+            result = {"ok": True, "kind": "long-press", "events": ["pointerEnter", "pointerDown", "pointerUp", "pointerExit"]}
+        return {"job": {"id": job_id, "status": "succeeded", "result": result}}
 
     def hierarchy_roots(self):
         self.calls.append(("hierarchy/roots", None))
@@ -130,6 +163,39 @@ class FakeClient:
             ("interaction/set-value", {"path": path, "value": value, "component": component, "scene": scene})
         )
         return {"ok": True, "component": component or "Slider"}
+
+    def interaction_long_press(self, path, duration_seconds=0.5, force=False, scene=None):
+        self.calls.append(
+            (
+                "interaction/long-press",
+                {
+                    "path": path,
+                    "durationSeconds": duration_seconds,
+                    "force": force,
+                    "scene": scene,
+                },
+            )
+        )
+        return {"ok": True, "jobId": "job-gesture-1"}
+
+    def interaction_drag(
+        self, path, delta_x, delta_y, duration_seconds=0.3, steps=8, force=False, scene=None
+    ):
+        self.calls.append(
+            (
+                "interaction/drag",
+                {
+                    "path": path,
+                    "deltaX": delta_x,
+                    "deltaY": delta_y,
+                    "durationSeconds": duration_seconds,
+                    "steps": steps,
+                    "force": force,
+                    "scene": scene,
+                },
+            )
+        )
+        return {"ok": True, "jobId": "job-gesture-2"}
 
     def gameplay_list(self):
         self.calls.append(("gameplay/commands", None))
@@ -1526,9 +1592,250 @@ def test_snapshot_dispatches_and_waits_for_job(monkeypatch, tmp_path, capsys):
     assert output["ok"] is True
     assert output["path"] == "/tmp/shot.png"
     assert output["width"] == 640
+    assert "annotatedPath" not in output
     call_path, payload = clients[0].calls[-1]
     assert call_path == "capture/screenshot"
     assert payload["reason"] == "assert_failure"
+
+
+def test_snapshot_annotate_returns_optional_fields(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    def fake_wait_for_job(project_path, job_id, timeout_seconds, poll_interval=0.5, initial_info=None, raise_on_failure=True):
+        return {
+            "id": job_id,
+            "status": "succeeded",
+            "result": {
+                "path": "/tmp/shot.png",
+                "width": 640,
+                "height": 360,
+                "annotatedPath": "/tmp/shot.annotated.png",
+                "annotationsPath": "/tmp/shot.annotations.json",
+                "coordinateSpace": "image-top-left",
+                "scale": 0.5,
+                "annotationMeta": {"uguiAvailable": False, "elementCount": 0, "schemaVersion": 1},
+            },
+        }
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(["--project", str(tmp_path), "snapshot", "--annotate"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["annotatedPath"] == "/tmp/shot.annotated.png"
+    assert output["coordinateSpace"] == "image-top-left"
+    assert output["annotationMeta"]["uguiAvailable"] is False
+    assert any(
+        call[0] == "capture/screenshot" and call[1].get("annotate") is True for call in clients[0].calls
+    )
+
+
+def test_hit_test_dispatches(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "hit-test",
+            "--x",
+            "10",
+            "--y",
+            "20",
+            "--image-width",
+            "100",
+            "--image-height",
+            "200",
+        ]
+    )
+
+    assert exit_code == 0
+    assert ("capture/hit-test", {"x": 10.0, "y": 20.0, "imageWidth": 100.0, "imageHeight": 200.0}) in clients[0].calls
+
+
+def test_hit_test_missing_route_on_old_capture_bridge_returns_capability_error(
+    monkeypatch, tmp_path, capsys
+):
+    patch_bridge(monkeypatch)
+
+    def old_capture_capabilities(self):
+        return {
+            "ok": True,
+            "capabilities": ["core", "capture"],
+            "routes": [{"method": "POST", "path": "capture/screenshot"}],
+        }
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", old_capture_capabilities)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "hit-test",
+            "--x",
+            "10",
+            "--y",
+            "20",
+            "--image-width",
+            "100",
+            "--image-height",
+            "200",
+        ]
+    )
+
+    assert exit_code == 1
+    error = json.loads(capsys.readouterr().err)
+    assert error["code"] == "bridge_capability_missing"
+
+
+def test_long_press_waits_for_job(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    def fake_wait_for_job(project_path, job_id, timeout_seconds, poll_interval=0.5, initial_info=None, raise_on_failure=True):
+        return {
+            "id": job_id,
+            "status": "succeeded",
+            "result": {"ok": True, "kind": "long-press", "events": ["pointerEnter", "pointerDown", "pointerUp", "pointerExit"]},
+        }
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "long-press", "Canvas/Button", "--duration", "0.2"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["kind"] == "long-press"
+    assert any(call[0] == "interaction/long-press" for call in clients[0].calls)
+
+
+def test_drag_waits_for_job(monkeypatch, tmp_path, capsys):
+    clients, _, _, _ = patch_bridge(monkeypatch)
+
+    def fake_wait_for_job(project_path, job_id, timeout_seconds, poll_interval=0.5, initial_info=None, raise_on_failure=True):
+        return {"id": job_id, "status": "succeeded", "result": {"ok": True, "kind": "drag", "events": ["beginDrag", "drag", "endDrag"]}}
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "drag", "Canvas/Handle", "--delta-x", "30", "--delta-y", "-10", "--steps", "4"]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["kind"] == "drag"
+    assert any(call[0] == "interaction/drag" for call in clients[0].calls)
+
+
+def test_long_press_default_timeout_covers_server_deadline(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    observed = {}
+
+    def fake_wait_for_job(
+        project_path,
+        job_id,
+        timeout_seconds,
+        poll_interval=0.5,
+        initial_info=None,
+        raise_on_failure=True,
+    ):
+        observed["timeout"] = timeout_seconds
+        return {"id": job_id, "status": "succeeded", "result": {"ok": True}}
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(
+        ["--project", str(tmp_path), "long-press", "Canvas/Button", "--duration", "30"]
+    )
+
+    assert exit_code == 0
+    assert observed["timeout"] >= 36.0
+    capsys.readouterr()
+
+
+def test_long_press_explicit_timeout_is_not_extended(monkeypatch, tmp_path, capsys):
+    patch_bridge(monkeypatch)
+    observed = {}
+
+    def fake_wait_for_job(
+        project_path,
+        job_id,
+        timeout_seconds,
+        poll_interval=0.5,
+        initial_info=None,
+        raise_on_failure=True,
+    ):
+        observed["timeout"] = timeout_seconds
+        return {"id": job_id, "status": "succeeded", "result": {"ok": True}}
+
+    monkeypatch.setattr(cli, "wait_for_job", fake_wait_for_job)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "long-press",
+            "Canvas/Button",
+            "--duration",
+            "30",
+            "--timeout",
+            "2",
+        ]
+    )
+
+    assert exit_code == 0
+    assert observed["timeout"] == 2.0
+    capsys.readouterr()
+
+
+def test_long_press_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
+    _, _, _, _ = patch_bridge(monkeypatch)
+
+    def legacy_capabilities(self):
+        return {"ok": True, "capabilities": ["core", "capture"]}
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", legacy_capabilities)
+
+    exit_code = cli.main(["--project", str(tmp_path), "long-press", "A/B"])
+
+    assert exit_code != 0
+    err = json.loads(capsys.readouterr().err)
+    assert err["code"] == "bridge_capability_missing"
+
+
+def test_drag_missing_route_on_old_interaction_bridge_returns_capability_error(
+    monkeypatch, tmp_path, capsys
+):
+    patch_bridge(monkeypatch)
+
+    def old_interaction_capabilities(self):
+        return {
+            "ok": True,
+            "capabilities": ["core", "interaction"],
+            "routes": [{"method": "POST", "path": "interaction/click"}],
+        }
+
+    monkeypatch.setattr(FakeClient, "get_capabilities", old_interaction_capabilities)
+
+    exit_code = cli.main(
+        [
+            "--project",
+            str(tmp_path),
+            "drag",
+            "A/B",
+            "--delta-x",
+            "10",
+            "--delta-y",
+            "5",
+        ]
+    )
+
+    assert exit_code != 0
+    err = json.loads(capsys.readouterr().err)
+    assert err["code"] == "bridge_capability_missing"
 
 
 def test_snapshot_missing_capability_returns_error(monkeypatch, tmp_path, capsys):
@@ -1567,7 +1874,7 @@ def test_snapshot_job_failure_surfaces_error_code(monkeypatch, tmp_path, capsys)
 def test_snapshot_start_failure_raises_cli_error(monkeypatch, tmp_path, capsys):
     patch_bridge(monkeypatch)
 
-    def denied_capture(self, reason=None, max_long_edge=None, target_directory=None):
+    def denied_capture(self, reason=None, max_long_edge=None, target_directory=None, annotate=False):
         return {"ok": False, "code": "capture_disabled", "message": "disabled"}
 
     monkeypatch.setattr(FakeClient, "capture_screenshot", denied_capture)

@@ -44,6 +44,7 @@
           "enum": [
             "open-scene", "play", "stop", "pause", "resume",
             "click", "input", "set-value", "invoke",
+            "long-press", "drag",
             "screenshot", "snapshot",
             "profile-start", "profile-stop",
             "wait-for", "assert"
@@ -73,7 +74,31 @@
         },
         "force": {
           "type": "boolean",
-          "description": "click 专用：跳过射线验证。"
+          "description": "click/long-press/drag 专用：跳过射线验证。"
+        },
+        "durationSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "description": "long-press/drag 专用：手势持续时间（秒）。"
+        },
+        "deltaX": {
+          "type": "number",
+          "minimum": -3.4028235e38,
+          "maximum": 3.4028235e38,
+          "description": "drag 专用：水平位移（Unity 屏幕像素，右为正）。"
+        },
+        "deltaY": {
+          "type": "number",
+          "minimum": -3.4028235e38,
+          "maximum": 3.4028235e38,
+          "description": "drag 专用：垂直位移（Unity 屏幕像素，上为正）。"
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "description": "drag 专用：拖拽插值步数。"
         },
         "text": {
           "type": "string",

@@ -7,7 +7,7 @@ from typing import Any
 
 from unityctl import __version__
 from unityctl.build import BuildError, run_build
-from unityctl.client import BridgeClient, BridgeClientError
+from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
 from unityctl.config import (
     ConfigError,
     UNITY_AGENT_BRIDGE_PACKAGE_ID,
@@ -42,6 +42,7 @@ from unityctl.editor import start_editor
 from unityctl.health import HealthError, run_health
 from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
 from unityctl.scenario import (
+    DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS,
     ScenarioContext,
     ScenarioValidationError,
     convert_recording_to_scenario,
@@ -642,6 +643,38 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="等待截图 job 完成的超时秒数",
     )
+    snapshot.add_argument(
+        "--annotate",
+        action="store_true",
+        help="额外生成标注 PNG 与 annotations.json sidecar（不修改场景 Hierarchy）",
+    )
+
+    hit_test = subparsers.add_parser(
+        "hit-test",
+        help="对截图像素坐标做 UGUI + Physics3D 命中探测（需 Play Mode）",
+        description=(
+            "把 PNG/图像左上原点坐标转换为 Game View 屏幕坐标，分别返回 ugui.hits 与 physics3d.hits。"
+            "不依赖 interaction capability，NoUGUI 下仍可探测 3D Physics。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(hit_test)
+    hit_test.add_argument("--x", type=float, required=True, help="图像 X（左上原点）")
+    hit_test.add_argument("--y", type=float, required=True, help="图像 Y（左上原点）")
+    hit_test.add_argument(
+        "--image-width",
+        type=float,
+        required=True,
+        dest="image_width",
+        help="截图/图像宽度",
+    )
+    hit_test.add_argument(
+        "--image-height",
+        type=float,
+        required=True,
+        dest="image_height",
+        help="截图/图像高度",
+    )
 
     click_cmd = subparsers.add_parser(
         "click",
@@ -703,6 +736,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="显式指定组件（节点上有多个可设值组件时必填），如 Slider/Toggle/Scrollbar/Dropdown/ScrollRect",
     )
     set_value_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    long_press_cmd = subparsers.add_parser(
+        "long-press",
+        help="长按 UGUI 节点（异步 job，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/long-press 启动跨帧长按：pointerEnter→Down→保持→Up→Exit，"
+            "默认不发送 pointerClick。HTTP 立即返回 jobId，本命令自动轮询至终态。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(long_press_cmd)
+    long_press_cmd.add_argument("path", help="节点 path 或 instanceId")
+    long_press_cmd.add_argument(
+        "--duration",
+        type=float,
+        default=0.5,
+        dest="duration_seconds",
+        metavar="SECONDS",
+        help="长按持续时间（秒，默认 0.5）",
+    )
+    long_press_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="跳过射线遮挡检测，直接对目标节点派发",
+    )
+    long_press_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    long_press_cmd.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待手势 job 完成的超时秒数（默认至少覆盖手势时长与服务端清理窗口）",
+    )
+
+    drag_cmd = subparsers.add_parser(
+        "drag",
+        help="拖拽 UGUI 节点（异步 job，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/drag 启动跨帧拖拽："
+            "Enter→Down→initializePotentialDrag→beginDrag→drag*→endDrag→Up→Exit。"
+            "delta 使用 Unity 屏幕像素（右/上为正）。HTTP 立即返回 jobId，本命令自动轮询。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(drag_cmd)
+    drag_cmd.add_argument("path", help="节点 path 或 instanceId")
+    drag_cmd.add_argument("--delta-x", type=float, required=True, dest="delta_x", help="水平位移（右为正）")
+    drag_cmd.add_argument("--delta-y", type=float, required=True, dest="delta_y", help="垂直位移（上为正）")
+    drag_cmd.add_argument(
+        "--duration",
+        type=float,
+        default=0.3,
+        dest="duration_seconds",
+        metavar="SECONDS",
+        help="拖拽持续时间（秒，默认 0.3）",
+    )
+    drag_cmd.add_argument(
+        "--steps",
+        type=int,
+        default=8,
+        help="拖拽插值步数（默认 8）",
+    )
+    drag_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="跳过射线遮挡检测，直接对目标节点派发",
+    )
+    drag_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    drag_cmd.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待手势 job 完成的超时秒数（默认至少覆盖手势时长与服务端清理窗口）",
+    )
 
     gameplay = subparsers.add_parser(
         "gameplay",
@@ -963,9 +1071,12 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
         "snapshot": cmd_snapshot,
+        "hit-test": cmd_hit_test,
         "click": cmd_click,
         "input": cmd_input,
         "set-value": cmd_set_value,
+        "long-press": cmd_long_press,
+        "drag": cmd_drag,
         "gameplay": cmd_gameplay,
         "record": cmd_record,
         "profile": cmd_profile,
@@ -1562,6 +1673,7 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         reason=args.reason,
         max_long_edge=args.max_long_edge,
         target_directory=args.target_directory,
+        annotate=bool(getattr(args, "annotate", False)),
     )
     if not start_response.get("ok", False):
         raise CliError(
@@ -1583,7 +1695,7 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         raise CliError("editor_exited", str(exc)) from exc
 
     result = job.get("result") or {}
-    return {
+    response = {
         "ok": True,
         "code": "ok",
         "jobId": job_id,
@@ -1591,6 +1703,30 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "width": result.get("width"),
         "height": result.get("height"),
     }
+    for key in (
+        "annotatedPath",
+        "annotationsPath",
+        "coordinateSpace",
+        "referenceScreen",
+        "scale",
+        "annotationMeta",
+    ):
+        if key in result:
+            response[key] = result[key]
+    return response
+
+
+def cmd_hit_test(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "capture", "POST", "capture/hit-test")
+    return client.capture_hit_test(
+        x=args.x,
+        y=args.y,
+        image_width=args.image_width,
+        image_height=args.image_height,
+    )
 
 
 def cmd_click(args: argparse.Namespace) -> dict[str, Any]:
@@ -1616,6 +1752,89 @@ def cmd_set_value(args: argparse.Namespace) -> dict[str, Any]:
     _require_capability(client, "interaction")
     value = _parse_value_arg(args.value)
     return client.interaction_set_value(path=args.path, value=value, component=args.component, scene=args.scene)
+
+
+def cmd_long_press(args: argparse.Namespace) -> dict[str, Any]:
+    return _wait_gesture_job(
+        args,
+        route_path="interaction/long-press",
+        start_fn=lambda client: client.interaction_long_press(
+            path=args.path,
+            duration_seconds=args.duration_seconds,
+            force=args.force,
+            scene=args.scene,
+        ),
+    )
+
+
+def cmd_drag(args: argparse.Namespace) -> dict[str, Any]:
+    return _wait_gesture_job(
+        args,
+        route_path="interaction/drag",
+        start_fn=lambda client: client.interaction_drag(
+            path=args.path,
+            delta_x=args.delta_x,
+            delta_y=args.delta_y,
+            duration_seconds=args.duration_seconds,
+            steps=args.steps,
+            force=args.force,
+            scene=args.scene,
+        ),
+    )
+
+
+def _wait_gesture_job(args: argparse.Namespace, route_path: str, start_fn) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "interaction", "POST", route_path)
+
+    start_response = start_fn(client)
+    if not start_response.get("ok", False):
+        raise CliError(
+            start_response.get("code", "internal_error"),
+            start_response.get("message", "启动手势 job 失败"),
+        )
+
+    job_id = start_response.get("jobId")
+    if not job_id:
+        # 同步失败（例如 occluded）已直接返回
+        return start_response
+
+    try:
+        timeout_seconds = (
+            args.timeout
+            if args.timeout is not None
+            else max(
+                DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS,
+                float(args.duration_seconds) + 6.0,
+            )
+        )
+        job = wait_for_job(
+            project_path,
+            job_id,
+            timeout_seconds=timeout_seconds,
+            initial_info=info,
+        )
+    except JobFailed as exc:
+        evidence = (exc.job or {}).get("result") or {}
+        raise CliError(
+            exc.job.get("errorCode", "internal_error"),
+            exc.job.get("errorMessage", "手势失败"),
+            extra=evidence if evidence else None,
+        ) from exc
+    except JobTimeout as exc:
+        raise CliError("timeout", str(exc)) from exc
+    except JobEditorExited as exc:
+        raise CliError("editor_exited", str(exc)) from exc
+
+    result = job.get("result") or {}
+    return {
+        "ok": True,
+        "code": "ok",
+        "jobId": job_id,
+        **result,
+    }
 
 
 def cmd_gameplay(args: argparse.Namespace) -> dict[str, Any]:
@@ -1748,6 +1967,13 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
         capture_config=_load_capture_config(effective.project_path),
         timeout_scale=args.timeout_scale,
         screenshot_target_directory=str(session.session_path / "artifacts"),
+        job_wait_fn=lambda job_id, timeout_seconds, raise_on_failure: wait_for_job(
+            effective.project_path,
+            job_id,
+            timeout_seconds=timeout_seconds,
+            initial_info=info,
+            raise_on_failure=raise_on_failure,
+        ),
     )
 
     try:
