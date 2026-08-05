@@ -32,9 +32,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             ("GET", "hierarchy/ancestors"),
             ("GET", "hierarchy/inspect"),
             ("POST", "capture/screenshot"),
+            ("POST", "capture/hit-test"),
             ("POST", "interaction/click"),
             ("POST", "interaction/input"),
             ("POST", "interaction/set-value"),
+            ("POST", "interaction/long-press"),
+            ("POST", "interaction/drag"),
             ("GET", "gameplay/commands"),
             ("POST", "gameplay/invoke"),
             ("POST", "recording/start"),
@@ -95,7 +98,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
         }
 
         [Test]
-        public void FullInstall_RegistersExactlyThirtyRoutesInOrder()
+        public void FullInstall_RegistersExactlyThirtyThreeRoutesInOrder()
         {
             if (!HasUguiCapabilities())
             {
@@ -104,7 +107,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
 
             IReadOnlyList<(string Method, string Path)> actual = RouteTable.ListRoutes();
 
-            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 30");
+            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 33");
             for (int i = 0; i < FullInstallRoutes.Length; i++)
             {
                 Assert.AreEqual(FullInstallRoutes[i].Method, actual[i].Method, $"route[{i}].method");
@@ -172,13 +175,14 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
         {
             List<(string Method, string Path)> expected = BuildNoUguiRoutes();
 
-            Assert.AreEqual(24, expected.Count, "NoUGUI 路由数应为 24");
+            Assert.AreEqual(25, expected.Count, "NoUGUI 路由数应为 25");
             Assert.AreEqual(("GET", "status"), expected[0]);
             Assert.AreEqual(("GET", "jobs/{id}"), expected[10]);
             Assert.AreEqual(("POST", "capture/screenshot"), expected[16]);
-            Assert.AreEqual(("GET", "gameplay/commands"), expected[17]);
-            Assert.AreEqual(("POST", "health/scan-prefabs"), expected[22]);
-            Assert.AreEqual(("GET", "capabilities"), expected[23]);
+            Assert.AreEqual(("POST", "capture/hit-test"), expected[17]);
+            Assert.AreEqual(("GET", "gameplay/commands"), expected[18]);
+            Assert.AreEqual(("POST", "health/scan-prefabs"), expected[23]);
+            Assert.AreEqual(("GET", "capabilities"), expected[24]);
         }
 
         [Test]
@@ -192,7 +196,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
         }
 
         [Test]
-        public void NoUgui_RuntimeRegistersExactlyTwentyFourRoutesInOrder()
+        public void NoUgui_RuntimeRegistersExactlyTwentyFiveRoutesInOrder()
         {
             if (HasUguiCapabilities())
             {
@@ -202,7 +206,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             List<(string Method, string Path)> expected = BuildNoUguiRoutes();
             IReadOnlyList<(string Method, string Path)> actual = RouteTable.ListRoutes();
 
-            Assert.AreEqual(expected.Count, actual.Count, "NoUGUI 路由数应为 24");
+            Assert.AreEqual(expected.Count, actual.Count, "NoUGUI 路由数应为 25");
             for (int i = 0; i < expected.Count; i++)
             {
                 Assert.AreEqual(expected[i].Method, actual[i].Method, $"route[{i}].method");

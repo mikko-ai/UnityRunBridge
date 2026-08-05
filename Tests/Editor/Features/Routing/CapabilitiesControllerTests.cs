@@ -46,12 +46,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Routing
             JsonValue response = CapabilitiesController.BuildResponse();
             if (HasUguiCapabilities())
             {
-                Assert.AreEqual(30, response["routes"].Count, "完整安装应暴露 30 条路由");
+                Assert.AreEqual(33, response["routes"].Count, "完整安装应暴露 33 条路由");
                 Assert.AreEqual(9, response["capabilities"].Count, "完整安装应暴露 9 个 capability");
             }
             else
             {
-                Assert.AreEqual(24, response["routes"].Count, "NoUGUI 应暴露 24 条路由");
+                Assert.AreEqual(25, response["routes"].Count, "NoUGUI 应暴露 25 条路由");
                 Assert.AreEqual(7, response["capabilities"].Count, "NoUGUI 应暴露 7 个 capability");
             }
         }

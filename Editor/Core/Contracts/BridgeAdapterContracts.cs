@@ -36,6 +36,45 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
     }
 
     /// <summary>
+    /// UI 标注收集契约：扫描当前场景中可交互且射线可达的 UI 元素，
+    /// 返回不含可选包类型的 DTO。无 UGUI Adapter 时 Features 走降级路径。
+    /// </summary>
+    public interface IUiAnnotationBackend
+    {
+        IReadOnlyList<UiAnnotationElement> CollectAnnotatableElements();
+    }
+
+    /// <summary>
+    /// UI 命中探测契约：对 Unity 屏幕坐标（左下原点）执行 EventSystem 射线，
+    /// 返回有序命中列表。Features 不直接引用 EventSystem。
+    /// </summary>
+    public interface IUiHitTestBackend
+    {
+        IReadOnlyList<UiHitResult> Raycast(Vector2 screenPoint);
+    }
+
+    /// <summary>
+    /// 跨帧手势后端契约：long-press / drag 的单步推进。
+    /// Click 保持 IInteractionBackend 不变；本契约仅服务异步 Job 手势。
+    /// </summary>
+    public interface IInteractionGestureBackend
+    {
+        InteractionGestureSession BeginLongPress(GameObject target, float durationSeconds, bool force);
+
+        InteractionGestureSession BeginDrag(
+            GameObject target,
+            float deltaX,
+            float deltaY,
+            float durationSeconds,
+            int steps,
+            bool force);
+
+        /// <summary>推进一帧；返回 true 表示手势已结束（成功或失败结果已写入 session.Result）。</summary>
+        bool Tick(InteractionGestureSession session);
+        void Cancel(InteractionGestureSession session);
+    }
+
+    /// <summary>
     /// 录制语义后端契约：把屏幕坐标解析为点击目标，并查询当前 UI 选中对象。
     /// EventSystem 等可选包细节留在 Adapter；Features 只经本契约访问。
     /// </summary>

@@ -17,11 +17,17 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
             UguiTextControlAdapter text = new UguiTextControlAdapter();
             UguiInteractionBackend interaction = new UguiInteractionBackend();
             UguiRecordingSemanticBackend recording = new UguiRecordingSemanticBackend();
+            UguiAnnotationBackend annotation = new UguiAnnotationBackend();
+            UguiHitTestBackend hitTest = new UguiHitTestBackend();
+            UguiInteractionGestureBackend gesture = new UguiInteractionGestureBackend();
 
             services.Add<INodeEnricher>(enricher, enricher.Priority);
             services.Add<ITextControlAdapter>(text, text.Priority);
             services.Add<IInteractionBackend>(interaction, 100);
             services.Add<IRecordingSemanticBackend>(recording, 100);
+            services.Add<IUiAnnotationBackend>(annotation, 100);
+            services.Add<IUiHitTestBackend>(hitTest, 100);
+            services.Add<IInteractionGestureBackend>(gesture, 100);
         }
     }
 }

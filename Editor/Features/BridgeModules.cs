@@ -101,7 +101,7 @@ namespace Mk.UnityAgentBridge.Editor
         }
     }
 
-    /// <summary>capture：POST /capture/screenshot。</summary>
+    /// <summary>capture：POST /capture/screenshot、POST /capture/hit-test。</summary>
     [BridgeModule]
     public sealed class CaptureBridgeModule : IBridgeModule
     {
@@ -111,11 +111,13 @@ namespace Mk.UnityAgentBridge.Editor
 
         public void RegisterRoutes(IRouteRegistrar routes, IBridgeServiceResolver services)
         {
+            IBridgeServiceResolver captured = services;
             routes.Map("POST", "capture/screenshot", ctx => CaptureController.CaptureScreenshot((BridgeRequestContext)ctx));
+            routes.Map("POST", "capture/hit-test", ctx => HitTestController.HitTest((BridgeRequestContext)ctx, captured));
         }
     }
 
-    /// <summary>interaction：click / input / set-value；无 IInteractionBackend 时整组不注册。</summary>
+    /// <summary>interaction：click / input / set-value / long-press / drag；无 IInteractionBackend 时整组不注册。</summary>
     [BridgeModule]
     public sealed class InteractionBridgeModule : IBridgeModule
     {
@@ -132,6 +134,8 @@ namespace Mk.UnityAgentBridge.Editor
             routes.Map("POST", "interaction/click", ctx => InteractionController.Click((BridgeRequestContext)ctx, captured));
             routes.Map("POST", "interaction/input", ctx => InteractionController.Input((BridgeRequestContext)ctx, captured));
             routes.Map("POST", "interaction/set-value", ctx => InteractionController.SetValue((BridgeRequestContext)ctx, captured));
+            routes.Map("POST", "interaction/long-press", ctx => InteractionGestureRunner.StartLongPress((BridgeRequestContext)ctx, captured));
+            routes.Map("POST", "interaction/drag", ctx => InteractionGestureRunner.StartDrag((BridgeRequestContext)ctx, captured));
         }
     }
 
