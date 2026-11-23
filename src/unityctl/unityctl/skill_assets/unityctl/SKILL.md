@@ -1,6 +1,6 @@
 ---
 name: unityctl
-description: 使用 unityctl CLI 控制本地 Unity Editor 并验证运行结果。当需要启动 Unity Editor、进入/退出 Play Mode、触发脚本重编译、检查编译错误、收集 Unity Console 日志或生成运行 summary 时使用。适用于改完 Unity 项目代码后验证编译与运行是否正常的场景。
+description: 用 unityctl CLI 验证 Unity 项目。适用于启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
 x-unityctl-version: __UNITYCTL_VERSION__
 ---
 

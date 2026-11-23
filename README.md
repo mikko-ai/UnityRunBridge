@@ -421,6 +421,8 @@ unityctl skills init --target ~/.claude/skills        # 安装到全局目录（
 
 skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的 CLI 版本。
 
+内置 Skill 的触发范围可用[中英双语触发评测](evals/README.md)检查。离线自检随 Python 测试运行；盲评可独立导出与评分。
+
 ## 为你的项目编写自定义 skill
 
 官方 `unityctl` skill 是通用参考手册，由 `unityctl skills update` 整目录覆盖刷新，**不要直接修改它**。项目专属的知识与流程放在你自己的 skill 里：
