@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Mk.UnityAgentBridge.Editor.Contracts;
 using Mk.UnityAgentBridge.Editor.Json;
 using Mk.UnityAgentBridge.Editor.Jobs;
@@ -12,11 +13,20 @@ namespace Mk.UnityAgentBridge.Editor.Capture
 {
     /// <summary>
     /// POST /capture/screenshot：v1 只支持「Editor 交互模式 + Play Mode + Game View 可渲染」，
-    /// 用 Unity 进程内 API 读自身 framebuffer，不触发 OS 级屏幕录制权限（TCC）。
+    /// 读取当前 PlayModeView 的游戏画面，不截 Editor 窗口或显示器。
     /// annotate=true 时额外写出标注 PNG 与 JSON sidecar，不向场景创建 GameObject。
     /// </summary>
     internal static class CaptureController
     {
+        // Unity 2022.3's PlayModeView owns the rendered game surface. Do not use
+        // ScreenCapture from EditorApplication.update: it can capture the Editor panel.
+        private const BindingFlags PrivateStatic = BindingFlags.Static | BindingFlags.NonPublic;
+        private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+        private static readonly Type PlayModeViewType = typeof(EditorWindow).Assembly.GetType("UnityEditor.PlayModeView");
+        private static readonly MethodInfo GetMainPlayModeView =
+            PlayModeViewType?.GetMethod("GetMainPlayModeView", PrivateStatic);
+        private static readonly FieldInfo TargetTexture = PlayModeViewType?.GetField("m_TargetTexture", PrivateInstance);
+
         internal static object CaptureScreenshot(BridgeRequestContext ctx)
         {
             JsonValue body = ctx.Body;
@@ -52,7 +62,11 @@ namespace Mk.UnityAgentBridge.Editor.Capture
                 ? ArtifactPathGuard.ResolveArtifactDirectory()
                 : targetDirectoryRaw;
 
-            if (!ArtifactPathGuard.IsAllowedArtifactPath(projectRoot, targetDirectory))
+            // The built-in default can resolve to the scratch root. Explicit destinations
+            // must still be inside an allowed root, not the root itself.
+            bool defaultScratch = string.IsNullOrWhiteSpace(targetDirectoryRaw) &&
+                targetDirectory == ArtifactPathGuard.GetScratchRoot(projectRoot);
+            if (!defaultScratch && !ArtifactPathGuard.IsAllowedArtifactPath(projectRoot, targetDirectory))
             {
                 return BridgeResponse.Failure("invalid_argument", "targetDirectory must be under .unity-agent/sessions or .unity-agent/scratch");
             }
@@ -97,7 +111,13 @@ namespace Mk.UnityAgentBridge.Editor.Capture
                 Texture2D annotated = null;
                 try
                 {
-                    captured = ScreenCapture.CaptureScreenshotAsTexture();
+                    var gameSurface = FindGameSurface();
+                    if (gameSurface == null)
+                    {
+                        handle.Fail("capture_unavailable", "Game View has no readable rendered surface. Make it visible in Play Mode.");
+                        return;
+                    }
+                    captured = ReadGameSurface(gameSurface, SystemInfo.graphicsUVStartsAtTop);
                     Texture2D output = captured;
                     int width = captured.width;
                     int height = captured.height;
@@ -124,7 +144,7 @@ namespace Mk.UnityAgentBridge.Editor.Capture
 
                     if (annotate)
                     {
-                        AppendAnnotations(result, output, outputPath, services, out annotated);
+                        AppendAnnotations(result, output, outputPath, captured.width, captured.height, services, out annotated);
                     }
 
                     handle.Succeed(result);
@@ -153,10 +173,63 @@ namespace Mk.UnityAgentBridge.Editor.Capture
             });
         }
 
+        internal static RenderTexture FindGameSurface()
+        {
+            var view = GetMainPlayModeView?.Invoke(null, null) as EditorWindow;
+            var surface = view != null ? TargetTexture?.GetValue(view) as RenderTexture : null;
+            return surface != null && surface.IsCreated() ? surface : null;
+        }
+
+        internal static Texture2D ReadGameSurface(RenderTexture surface, bool flipY = false)
+        {
+            RenderTexture original = RenderTexture.active;
+            Texture2D image = new Texture2D(surface.width, surface.height, TextureFormat.RGBA32, false);
+            try
+            {
+                RenderTexture.active = surface;
+                image.ReadPixels(new Rect(0, 0, surface.width, surface.height), 0, 0, false);
+                if (flipY)
+                {
+                    FlipRows(image);
+                }
+                image.Apply(false);
+                return image;
+            }
+            catch
+            {
+                UnityEngine.Object.DestroyImmediate(image);
+                throw;
+            }
+            finally
+            {
+                RenderTexture.active = original;
+            }
+        }
+
+        // Match the display orientation used by Game View on top-origin graphics APIs.
+        internal static void FlipRows(Texture2D image)
+        {
+            var pixels = image.GetRawTextureData<Color32>();
+            int width = image.width;
+            for (int y = 0; y < image.height / 2; y++)
+            {
+                int top = (image.height - 1 - y) * width;
+                int bottom = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    Color32 pixel = pixels[bottom + x];
+                    pixels[bottom + x] = pixels[top + x];
+                    pixels[top + x] = pixel;
+                }
+            }
+        }
+
         private static void AppendAnnotations(
             Dictionary<string, object> result,
             Texture2D output,
             string outputPath,
+            int referenceWidth,
+            int referenceHeight,
             IBridgeServiceResolver services,
             out Texture2D annotated)
         {
@@ -164,11 +237,11 @@ namespace Mk.UnityAgentBridge.Editor.Capture
             IUiAnnotationBackend annotationBackend = null;
             bool uguiAvailable = services != null && services.TryGet(out annotationBackend);
             IReadOnlyList<UiAnnotationElement> elements = uguiAvailable && annotationBackend != null
-                ? annotationBackend.CollectAnnotatableElements()
+                ? annotationBackend.CollectAnnotatableElements(referenceWidth, referenceHeight)
                 : Array.Empty<UiAnnotationElement>();
 
             annotated = ScreenshotAnnotationRenderer.Render(
-                output, elements, out JsonValue sidecar, out float scale);
+                output, elements, referenceWidth, referenceHeight, out JsonValue sidecar, out float scale);
 
             string annotatedPath = DeriveSiblingPath(outputPath, ".annotated.png");
             string annotationsPath = DeriveSiblingPath(outputPath, ".annotations.json");

@@ -22,6 +22,8 @@ namespace Mk.UnityAgentBridge.Editor.Capture
         public static Texture2D Render(
             Texture2D source,
             IReadOnlyList<UiAnnotationElement> elements,
+            int referenceWidth,
+            int referenceHeight,
             out JsonValue sidecar,
             out float scale)
         {
@@ -32,9 +34,9 @@ namespace Mk.UnityAgentBridge.Editor.Capture
 
             int width = source.width;
             int height = source.height;
-            // source 已是输出尺寸（可能已降采样）；referenceScreen 记录当前 Screen，便于对照
-            float refW = Screen.width > 0 ? Screen.width : width;
-            float refH = Screen.height > 0 ? Screen.height : height;
+            // Scale against the original Game View render surface, not the Editor panel.
+            float refW = referenceWidth;
+            float refH = referenceHeight;
             float scaleX = width / Mathf.Max(1f, refW);
             float scaleY = height / Mathf.Max(1f, refH);
             scale = Mathf.Min(scaleX, scaleY);

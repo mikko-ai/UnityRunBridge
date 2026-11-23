@@ -14,7 +14,7 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
     /// </summary>
     internal sealed class UguiAnnotationBackend : IUiAnnotationBackend
     {
-        public IReadOnlyList<UiAnnotationElement> CollectAnnotatableElements()
+        public IReadOnlyList<UiAnnotationElement> CollectAnnotatableElements(int referenceWidth, int referenceHeight)
         {
             List<UiAnnotationElement> collected = new List<UiAnnotationElement>();
             if (EventSystem.current == null)
@@ -47,7 +47,7 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
 
                 // 跳过完全在屏幕外的元素
                 if (rect.xMax < 0f || rect.yMax < 0f ||
-                    rect.xMin > Screen.width || rect.yMin > Screen.height)
+                    rect.xMin > referenceWidth || rect.yMin > referenceHeight)
                 {
                     continue;
                 }
