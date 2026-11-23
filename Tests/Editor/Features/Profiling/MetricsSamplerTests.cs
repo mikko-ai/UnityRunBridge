@@ -43,10 +43,12 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Profiling
             Assert.IsTrue(sample.ContainsKey("frame"));
             Assert.IsTrue(sample.ContainsKey("time"));
 
-            // 7 个固定指标里，可用的 = 7 - unavailable 数；样本字段数应为 frame/time 之外
-            // 恰好等于可用指标数（不可用的指标干脆不出现在样本里，不是以 0 填充）。
-            int expectedMetricFieldCount = 7 - MetricsSampler.UnavailableMetrics.Count;
-            Assert.AreEqual(expectedMetricFieldCount, sample.Count - 2);
+            // A valid recorder may have no data yet (especially in batch mode).
+            Assert.LessOrEqual(sample.Count - 2, 7 - MetricsSampler.UnavailableMetrics.Count);
+            foreach (string unavailable in MetricsSampler.UnavailableMetrics)
+            {
+                Assert.IsFalse(sample.ContainsKey(unavailable));
+            }
 
             MetricsSampler.StopSampling();
             yield return new ExitPlayMode();
