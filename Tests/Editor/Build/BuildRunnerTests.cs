@@ -13,6 +13,14 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Build
     public sealed class BuildRunnerTests
     {
         [Test]
+        public void ResolveBuildOptions_UsesCleanCacheOnlyOnOptIn()
+        {
+            Assert.AreEqual(BuildOptions.None, BuildRunner.ResolveBuildOptions(new[] { "Unity", "-batchmode" }));
+            Assert.AreEqual(BuildOptions.CleanBuildCache,
+                BuildRunner.ResolveBuildOptions(new[] { "Unity", "-batchmode", "-agentCleanBuild" }));
+        }
+
+        [Test]
         public void GetCommandLineArg_ReturnsNull_WhenArgNotPresent()
         {
             Assert.IsNull(BuildRunner.GetCommandLineArg("-doesNotExist"));
