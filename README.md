@@ -141,6 +141,7 @@ uv run unityctl --help
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
+| `build-size` | 离线分析构建大小、交付预算和资源导入线索 |
 | `health` | 项目健康检查（编译/缺失脚本/构建场景/包一致性） |
 | `skills init` / `skills update` | 安装 / 更新内置 agent skills（unityctl 参考手册 + project skill creator） |
 
@@ -366,6 +367,17 @@ unityctl build --target StandaloneOSX                     # 独立 batchmode 进
 ```
 
 `profile` 的采样值含 Editor 自身开销，只适合同机同项目改动前后的相对回归比较。`build` 会在独立 Unity 进程里执行（与正在运行的交互式 Editor 互斥，不会自动关闭），产物落在 `.unity-agent/builds/<buildId>/`，含 `build-report.json` 与 `build.log`。
+
+### 构建体积诊断
+
+```bash
+unityctl build --target StandaloneOSX --clean
+unityctl build-size --build-dir <本次构建归档路径> --report-budget-mib 200 --top 20
+unityctl build-size --artifact MyGame.zip --artifact-budget-mib 100
+unityctl build-size --scan-platform Android --max-texture-size 2048
+```
+
+`build-size` 不启动 Unity。日志未压缩统计、Unity 构建摘要和交付文件实测分别输出；预算缺证据时返回非零，不用旧构建或静态扫描代替。增量构建可能没有资源明细，配套更新 CLI 和 Unity 包后可用 `build --clean` 让 Unity 完整重建 Player 数据。静态扫描不是构建依赖分析，也不会修改导入设置。
 
 ## 项目健康检查
 

@@ -2,11 +2,14 @@ import argparse
 import json
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from unityctl import __version__
 from unityctl.build import BuildError, run_build
+from unityctl.build_size import analyze_build_size
+from unityctl.build_size_scan import SUPPORTED_PLATFORMS, scan_build_assets
 from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
 from unityctl.config import (
     ConfigError,
@@ -508,6 +511,25 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="等待构建进程结束的超时时间（秒），默认读取 config.json 的 timeouts.buildSeconds（3600）",
     )
+
+    build.add_argument("--clean", action="store_true", help="使用 Unity CleanBuildCache 完整重构建 Player 数据")
+
+    build_size = subparsers.add_parser(
+        "build-size",
+        help="只读分析构建归档、交付体积及资源导入风险",
+        description="不启动 Unity。构建日志、实际交付文件以及静态扫描使用不同口径。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(build_size)
+    report_input = build_size.add_mutually_exclusive_group()
+    report_input.add_argument("--build-dir", type=Path, help="含 build.log 和 build-report.json 的构建归档")
+    report_input.add_argument("--log", type=Path, help="独立 Editor 或 batchmode 构建日志")
+    build_size.add_argument("--artifact", type=Path, help="要计量的交付文件或目录")
+    build_size.add_argument("--report-budget-mib", help="日志未压缩总量预算（MiB）")
+    build_size.add_argument("--artifact-budget-mib", help="实际交付文件或目录字节总量预算（MiB）")
+    build_size.add_argument("--scan-platform", choices=SUPPORTED_PLATFORMS, help="指定平台并扫描目标项目 Assets")
+    build_size.add_argument("--max-texture-size", type=int, default=2048, help="静态扫描纹理边长提示阈值（像素）")
+    build_size.add_argument("--top", type=int, default=15, help="输出日志中最大的 N 个资源（1–1000）")
 
     health = subparsers.add_parser(
         "health",
@@ -1068,6 +1090,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "refresh": cmd_refresh,
         "doctor": cmd_doctor,
         "build": cmd_build,
+        "build-size": cmd_build_size,
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
         "snapshot": cmd_snapshot,
@@ -2124,6 +2147,7 @@ def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
             target=args.target,
             output_path=args.output_path,
             timeout_seconds=timeout_seconds,
+            clean=args.clean,
         )
     except BuildError as exc:
         raise CliError(exc.code, str(exc)) from exc
@@ -2143,6 +2167,37 @@ def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
         "warnings": report.get("warnings", []),
         "reportSource": report.get("reportSource"),
     }
+
+
+def cmd_build_size(args: argparse.Namespace) -> dict[str, Any]:
+    if not any((args.build_dir, args.log, args.artifact, args.scan_platform)):
+        raise CliError("invalid_request", "请指定 --build-dir、--log、--artifact 或 --scan-platform")
+    if not 1 <= args.top <= 1000:
+        raise CliError("invalid_request", "--top 必须在 1 至 1000 之间")
+
+    def budget_bytes(raw: str | None, option: str) -> int | None:
+        if raw is None:
+            return None
+        try:
+            value = Decimal(raw)
+        except InvalidOperation as exc:
+            raise CliError("invalid_request", f"{option} 必须是有限正数") from exc
+        if not value.is_finite() or not Decimal(1) / 2**20 <= value <= 2**40:
+            raise CliError("invalid_request", f"{option} 必须是有限正数，且预算至少 1 字节")
+        return int(value * 2**20)
+
+    result = analyze_build_size(
+        build_dir=args.build_dir.expanduser() if args.build_dir is not None else None,
+        log=args.log.expanduser() if args.log is not None else None,
+        artifact=args.artifact.expanduser() if args.artifact is not None else None,
+        report_budget_bytes=budget_bytes(args.report_budget_mib, "--report-budget-mib"),
+        artifact_budget_bytes=budget_bytes(args.artifact_budget_mib, "--artifact-budget-mib"),
+        top=args.top,
+    )
+    if args.scan_platform:
+        project = find_unity_project_root(args.project_path or Path.cwd())
+        result["assetScan"] = scan_build_assets(project, args.scan_platform, args.max_texture_size)
+    return result
 
 
 def cmd_health(args: argparse.Namespace) -> dict[str, Any]:

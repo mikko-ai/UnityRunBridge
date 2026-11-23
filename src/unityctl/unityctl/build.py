@@ -73,6 +73,8 @@ def build_command(
     output_path: str | Path,
     report_path: str | Path,
     log_path: str | Path,
+    *,
+    clean: bool = False,
 ) -> list[str]:
     command = [
         str(unity_executable),
@@ -93,6 +95,8 @@ def build_command(
         "-agentReportPath",
         str(report_path),
     ]
+    if clean:
+        command.append("-agentCleanBuild")
     return command
 
 
@@ -108,6 +112,8 @@ def run_build(
     timeout_seconds: float = 3600,
     popen: Callable[..., "subprocess.Popen[bytes]"] = subprocess.Popen,
     now_fn: Callable[[], float] = time.time,
+    *,
+    clean: bool = False,
 ) -> BuildResult:
     project = Path(project_path)
 
@@ -132,7 +138,7 @@ def run_build(
     resolved_output = Path(output_path) if output_path else default_output_path(build_dir, target)
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
 
-    command = build_command(executable, project, target, resolved_output, report_path, log_path)
+    command = build_command(executable, project, target, resolved_output, report_path, log_path, clean=clean)
 
     process = popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

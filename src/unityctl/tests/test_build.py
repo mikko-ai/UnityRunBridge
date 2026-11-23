@@ -250,3 +250,9 @@ def test_run_build_kills_process_and_raises_on_timeout(tmp_path, monkeypatch):
 
     assert exc.value.code == "build_timeout"
     assert fake_process.killed is True
+
+
+def test_clean_build_command_opts_in_without_changing_default():
+    args = ("/Unity", "/game", None, "/out", "/report.json", "/build.log")
+    assert "-agentCleanBuild" not in build_command(*args)
+    assert build_command(*args, clean=True)[-1] == "-agentCleanBuild"

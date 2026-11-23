@@ -1,6 +1,6 @@
 # unityctl reference：性能 / 构建 / 健康检查
 
-适用场景：性能采样（profile）、Player 构建诊断（build）、项目健康检查（health）。命令输出均为 JSON 信封（成功 `{"ok": true, ...}`，失败 stderr `{"ok": false, "code", "message"}`）。
+适用场景：性能采样（profile）、Player 构建诊断（build / build-size）、项目健康检查（health）。命令输出均为 JSON 信封（成功 `{"ok": true, ...}`，失败 stderr `{"ok": false, "code", "message"}`）。
 
 **Capability**：`profiling` 与 `health` 属于 Core 能力，**不依赖** UGUI。`build` 走独立 batchmode 进程，也不经过 Bridge capability 门控。
 
@@ -37,6 +37,16 @@ unityctl build --target Android --output /tmp/out.apk --timeout 1800
 - v1 只做 Player 构建（不含 AssetBundle/Addressables）。
 - 报告缺失时（多半是脚本编译错误导致 Unity 在真正开始构建前就中止，`-executeMethod` 从未跑起来）会从 `build.log` 里兜底解析 `Foo.cs(12,34): error CSxxxx: ...` 形式的编译错误行，此时 `reportSource` 为 `log_fallback`（正常情况下是 `build_report`）。
 - 退出码：`result: "Succeeded"` 为 `0`，其余（`Failed`/`Cancelled`）为 `1`，CI 友好；超时（默认 3600s，`config.json` 的 `timeouts.buildSeconds` 可配，或 `--timeout` 单次覆盖）会杀掉构建进程并报 `build_timeout`。
+
+## 构建体积诊断（只读，unityctl build-size）
+
+先确认限制的是哪个文件或目录，统计前后用同一口径：
+
+- `--build-dir PATH` 从一次成功的构建归档读取 `build-report.json` 和 `build.log`。`buildSummary.sizeBytes` 是 Unity 原始摘要；`logReport.totalBytes` 是日志里的未压缩总量，另外有资源分类和 `topAssets`。两者不是交付下载量。
+- 旧路径或自定义交付物用 `--artifact PATH` 明确指定；日志可以独立用 `--log PATH`。目录按普通文件长度求和，不等于压缩下载或磁盘占用；含符号链接时不能按此口径可靠计量，应指定真实归档文件。目录大小不含目录和文件系统元数据。
+- `--report-budget-mib` 对比完整日志的未压缩总量；`--artifact-budget-mib` 对比实际指定的文件或目录。各自输出 `passed`、`exceeded` 或 `unverified`；有未通过的预算就退出 1。增量构建可能无资源明细，需要时选择 `unityctl build --clean`，它让 Unity 清除构建缓存并重建 Player 数据，默认构建行为不变。
+- `--scan-platform Standalone|Android|iPhone|WebGL|tvOS` 可独立运行或与归档组合。它只看项目的 `Assets/`：平台纹理覆盖、PCM 大音频、`StreamingAssets`/Resources 大文件和已识别 glTFast 的嵌入 PNG/JPEG。检查 `unchecked` 避免把跳过的格式当成通过。这里的 `bytes` 是线索（像素估算或源文件大小），不应用于交付预算，也不能证明资源进入了包。
+- 对齐单平台、空的交付输出、相同构建设置做前后比较；压缩/减小资源后，还要复跑玩法并检查画质与音质，不凭体积下降判断改动可发布。
 
 ## 项目健康检查（unityctl health）
 
