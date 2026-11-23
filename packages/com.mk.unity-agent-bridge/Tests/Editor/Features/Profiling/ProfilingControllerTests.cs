@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using Mk.UnityAgentBridge.Editor.Json;
 using Mk.UnityAgentBridge.Editor.Profiling;
@@ -113,7 +114,6 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Profiling
                 string metricsPath = startJson["metricsPath"].AsString;
                 Assert.IsTrue(File.Exists(metricsPath));
                 Assert.AreEqual(string.Empty, File.ReadAllText(metricsPath));
-                int unavailableCount = startJson["unavailableMetrics"].Count;
 
                 // 再次 start 应该被拒绝（409 already_profiling）
                 object secondStart = ProfilingController.Start(BridgeRequestContext.ForTests());
@@ -153,7 +153,19 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Profiling
                 Assert.AreEqual(63, File.ReadAllLines(metricsPath).Length);
 
                 JsonValue aggregates = stopJson["aggregates"];
-                Assert.AreEqual(7 - unavailableCount, aggregates.Count);
+                HashSet<string> sampledMetrics = new HashSet<string>();
+                foreach (string line in File.ReadAllLines(metricsPath))
+                {
+                    Assert.IsTrue(JsonParser.TryParse(line, out JsonValue sample, out _));
+                    foreach (string key in sample.Keys)
+                    {
+                        if (key != "frame" && key != "time")
+                        {
+                            sampledMetrics.Add(key);
+                        }
+                    }
+                }
+                CollectionAssert.AreEquivalent(sampledMetrics, aggregates.Keys);
                 foreach (string key in aggregates.Keys)
                 {
                     JsonValue stat = aggregates[key];

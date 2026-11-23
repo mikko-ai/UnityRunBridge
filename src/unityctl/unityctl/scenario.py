@@ -193,6 +193,10 @@ def _validate_condition(source: str, condition: Any, prefix: str) -> list[str]:
         aggregate = condition.get("aggregate")
         if aggregate is not None and aggregate not in METRIC_AGGREGATES:
             errors.append(f"{prefix}: metric.aggregate 必须是 {'/'.join(METRIC_AGGREGATES)} 之一")
+        if "minSamples" in condition and (
+            type(condition["minSamples"]) is not int or condition["minSamples"] < 1
+        ):
+            errors.append(f"{prefix}: metric.minSamples 必须是正整数")
         errors.extend(_validate_compare_ops(condition, prefix, "metric"))
     # log 条件字段（type/messageContains/absent/sinceStep）均为可选组合，不做强校验。
     return errors
@@ -224,6 +228,7 @@ class ScenarioContext:
     now_fn: Callable[[], float] = time.monotonic
     screenshot_target_directory: str | None = None
     job_wait_fn: Callable[[str, float, bool], dict[str, Any]] | None = None
+    profile_issue: str | None = field(default=None, init=False, repr=False)
 
 
 def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, Any]:
@@ -231,6 +236,7 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
     if errors:
         raise ScenarioValidationError(errors)
 
+    ctx.profile_issue = None
     defaults = scenario.get("defaults") or {}
     steps = scenario["steps"]
 
@@ -420,11 +426,27 @@ def _execute_step(
         return _passthrough_result(response)
 
     if action == "profile-start":
+        ctx.profile_issue = "profile_not_stopped"
         response = ctx.client.profiling_start(target_directory=ctx.screenshot_target_directory)
         return _passthrough_result(response)
 
     if action == "profile-stop":
+        ctx.profile_issue = "profile_stop_failed"
         response = ctx.client.profiling_stop()
+        if response.get("ok") and response.get("code") == "not_profiling":
+            ctx.profile_issue = "not_profiling"
+            return "failed", "execution_error", {
+                **response, "ok": False,
+                "message": "没有本轮采样可停止，不能使用可能遗留的旧样本",
+            }, {}
+        if response.get("ok") and response.get("interrupted"):
+            ctx.profile_issue = "profile_interrupted"
+            return "failed", "execution_error", {
+                **response, "ok": False, "code": "profile_interrupted",
+                "message": "性能采样中断；已保存的部分样本不用于回归判定",
+            }, {}
+        if response.get("ok"):
+            ctx.profile_issue = None
         return _passthrough_result(response)
 
     if action in {"screenshot", "snapshot"}:
@@ -748,6 +770,11 @@ def _evaluate_metric_condition(ctx: ScenarioContext, condition: dict[str, Any]) 
     session 的 artifacts 目录）；文件不存在或该指标没有任何样本（可能计数器在本机/
     渲染管线下不可用）都判 metric_not_available，不静默当成 0。
     """
+    if ctx.profile_issue:
+        return False, {
+            "dataSource": "metrics.jsonl", "error": ctx.profile_issue,
+            "message": "本轮采样尚未成功停止；已有的样本不用于回归判定",
+        }
     metric_name = condition["name"]
     aggregate = condition.get("aggregate", "avg")
     metrics_path = ctx.session_path / "artifacts" / "metrics.jsonl"
@@ -762,13 +789,24 @@ def _evaluate_metric_condition(ctx: ScenarioContext, condition: dict[str, Any]) 
     values = [
         float(row[metric_name])
         for row in read_jsonl(metrics_path)
-        if isinstance(row.get(metric_name), (int, float))
+        if isinstance(row, dict) and _is_finite_number_in_range(
+            row.get(metric_name), inclusive_min=0,
+            exclusive_min=0 if metric_name == "frameTimeMs" else None,
+        )
     ]
     if not values:
         return False, {
             "dataSource": "metrics.jsonl",
             "error": "metric_not_available",
             "message": f"metrics.jsonl 中没有指标 '{metric_name}' 的样本（可能该计数器在本机/渲染管线下不可用）",
+        }
+
+    minimum = condition.get("minSamples", 1)
+    if len(values) < minimum:
+        return False, {
+            "dataSource": "metrics.jsonl", "error": "metric_insufficient_samples",
+            "metric": metric_name, "sampleCount": len(values), "minSamples": minimum,
+            "message": f"指标 '{metric_name}' 可用样本不足：{len(values)}/{minimum}",
         }
 
     actual = _aggregate_metric(values, aggregate)

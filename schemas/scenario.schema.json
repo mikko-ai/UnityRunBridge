@@ -205,6 +205,11 @@
           "type": "string",
           "enum": ["avg", "max", "p95"]
         },
+        "minSamples": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "进行比较之前所需的有限、非负数值样本数（主线程耗时必须为正），默认 1。"
+        },
         "equals": {},
         "notEquals": {},
         "greaterThan": { "type": "number" },

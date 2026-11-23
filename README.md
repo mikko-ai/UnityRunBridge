@@ -368,6 +368,10 @@ unityctl build --target StandaloneOSX                     # 独立 batchmode 进
 
 `profile` 的采样值含 Editor 自身开销，只适合同机同项目改动前后的相对回归比较。`build` 会在独立 Unity 进程里执行（与正在运行的交互式 Editor 互斥，不会自动关闭），产物落在 `.unity-agent/builds/<buildId>/`，含 `build-report.json` 与 `build.log`。
 
+### Editor 性能回归
+
+[性能回归示例](examples/verification/performance/README.md) 固定场景、预热和采样窗口，先取得三轮基线，再用 scenario 检查主线程与 GC 分配 p95。样本不足或中断不能通过预算。Editor 结果只用于同机相对比较。
+
 ### 构建体积诊断
 
 ```bash

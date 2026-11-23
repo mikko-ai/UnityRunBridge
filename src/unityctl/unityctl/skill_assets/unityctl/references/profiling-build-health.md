@@ -17,10 +17,14 @@ unityctl profile stop                                # 停止采样，返回 met
 ```
 
 - 固定计数器集（`metrics.jsonl` 字段名 → `ProfilerRecorder` 计数器）：`frameTimeMs`（Internal/"CPU Main Thread Frame Time"，纳秒转毫秒）、`gcAllocBytes`（Memory/"GC Allocated In Frame"）、`drawCalls`（Render/"Draw Calls Count"）、`setPassCalls`（Render/"SetPass Calls Count"）、`triangles`（Render/"Triangles Count"）、`totalMemoryBytes`（Memory/"Total Used Memory"）、`gcMemoryBytes`（Memory/"GC Used Memory"）。
-- 计数器在当前 Unity 版本/渲染管线下缺失时不采样该项，记入 `profile start` 响应的 `unavailableMetrics` 列表（不静默返回 0）；scenario 的 `metric` 断言引用不可用指标会判 `metric_not_available`。
+- 计数器在当前 Unity 版本/渲染管线下缺失时不采样该项，记入 `profile start` 响应的 `unavailableMetrics` 列表（不静默返回 0）；计数器可创建但尚无任何样本时同样省略该指标，本轮以实际 JSONL 样本为准。scenario 的 `metric` 断言引用不可用指标会判 `metric_not_available`。
 - 每 60 帧批量落盘一次（避免逐帧 IO）；domain reload / 退出 Play Mode 会打断采样，已落盘的批次保留，未落盘的一批（< 60 帧）按设计丢弃，`status`/`stop` 会如实返回 `interrupted: true`。
 - **重要限制**：Editor 内采样含 Editor 自身开销，绝对值不代表真机性能；正确用途是同机同项目改动前后的相对回归比较，阈值应基于本机基线自行设定。
 - session 存在 `artifacts/metrics.jsonl` 时，`unityctl summary` 会自动附加 `metrics` 段（各指标 `avg`/`max`/`p95` + `frameCount`）。
+
+### 复跑性能预算
+
+在相同机器、场景、种子/输入、画质、帧率和 Editor 模式下，用同一预热与采样窗口运行三次基线。可以通过只读的游戏帧数探针等待回合收敛，不能用点击后立即停采样代替完整窗口。记录主线程 `frameTimeMs` 与 `gcAllocBytes` 的 p95 和样本数，再用 scenario 的 `metric.minSamples` 和 `atMost` 检查相应预算；采样中断不能通过预算。不能用 Editor 主线程计数替代真机、渲染线程或 GPU Profiler 数据。
 
 ## 构建（独立进程，不经过 Bridge）
 

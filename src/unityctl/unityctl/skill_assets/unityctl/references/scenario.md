@@ -43,12 +43,12 @@ scenario 文件结构（`schemas/scenario.schema.json`）：
 - 控制类（复用现有能力）：`open-scene` / `play` / `stop` / `pause` / `resume`。
 - 操作类：`click`（含 `force`）/ `input`（含 `submit`）/ `set-value` / `invoke`（gameplay 命令，纯执行不判定）。
 - 观测类：`screenshot` / `snapshot`（受 `config.json` 里 `capture.screenshot.onScenarioStep` 开关控制；关闭时该步骤直接跳过，不算失败）。
-- 性能采样类：`profile-start` / `profile-stop`（对应 `unityctl profile start/stop`，产出 `artifacts/metrics.jsonl`，供后续 `metric` 断言使用）。
+- 性能采样类：`profile-start` / `profile-stop`（对应 `unityctl profile start/stop`，产出 `artifacts/metrics.jsonl`，供后续 `metric` 断言使用；检测到采样中断时 `profile-stop` 失败，已落盘数据只作诊断）。
 - 收敛/断言类：`wait-for`（轮询直到条件成立或超时，超时算步骤失败，`failureType: "timeout"`）/ `assert`（即时判定一次，不通过算 `failureType: "assertion_failed"`）。两者共用同一套条件模型，四选一 `source`：
   - `ui`：`path`（+可选 `scene`）或 `find`（同 `hierarchy find` 的过滤器子集）定位节点/节点集合后判定 `exists` / `activeInHierarchy` / `interactable` / `textEquals` / `textContains`（path 模式），或 `countEquals` / `countAtLeast` / `countAtMost`（find 模式）。
   - `log`：`{ "type", "messageContains", "absent", "sinceStep" }`；`absent: true` 断言「不应出现」；`sinceStep` 限定日志范围为第 N 步（steps 数组下标）开始之后，缺省为整个 session。
   - `gameplay`：`{ "command", "args", <比较符> }`，比较符六选一：`equals` / `notEquals` / `greaterThan` / `lessThan` / `atLeast` / `atMost`。
-  - `metric`：`{ "name", "aggregate", <比较符> }`，依赖前面已执行过的 `profile-start`/`profile-stop`；`aggregate` 三选一 `avg`（默认）/ `max`/ `p95`，比较符同 `gameplay`。metrics.jsonl 不存在，或该指标没有任何样本（可能在本机/渲染管线下不可用）都判 `metric_not_available`。
+  - `metric`：`{ "name", "aggregate", <比较符> }`，依赖前面已执行过的 `profile-start`/`profile-stop`；`aggregate` 三选一 `avg`（默认）/ `max`/ `p95`，比较符同 `gameplay`。metrics.jsonl 不存在，或该指标没有任何样本（可能在本机/渲染管线下不可用）都判 `metric_not_available`。可指定 `minSamples`（默认 1）；有限、非负的数值（`frameTimeMs` 必须大于 0，零分配仍有效）样本不足时返回 `metric_insufficient_samples`，不进行预算比较。
 
 其他字段：`id`（结果引用名，assert 缺省为 `step-<index>`）、`continueOnFailure`（默认 `false`：失败即中止后续步骤，跳到收尾；`true` 则继续执行下一步）、`timeoutSeconds`（覆盖 `defaults.waitTimeoutSeconds`）。
 

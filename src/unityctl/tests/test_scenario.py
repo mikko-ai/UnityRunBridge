@@ -1033,3 +1033,96 @@ def test_convert_recording_to_scenario_accepts_custom_name(tmp_path):
     scenario = convert_recording_to_scenario(actions_path, name="custom-name")
 
     assert scenario["name"] == "custom-name"
+
+
+@pytest.mark.parametrize("min_samples", [0, -1, 2.5, True, "5"])
+def test_metric_min_samples_rejects_invalid_count(min_samples):
+    scenario = _base_scenario([{"action": "assert", "metric": {
+        "name": "frameTimeMs", "minSamples": min_samples, "atMost": 20,
+    }}])
+    assert any("minSamples" in message for message in validate_scenario(scenario))
+
+
+def test_metric_min_samples_never_uses_nan_or_boolean_as_measurement(tmp_path):
+    client = FakeClient()
+    ctx = make_ctx(tmp_path, client)
+    path = ctx.session_path / "artifacts" / "metrics.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(path, [{"frameTimeMs": v} for v in (9.0, 10.0, True, float("nan"), float("inf"))])
+    scenario = _base_scenario([{"action": "assert", "metric": {
+        "name": "frameTimeMs", "aggregate": "p95", "minSamples": 3, "atMost": 20,
+    }}])
+    check = run_scenario(scenario, ctx)["steps"][0]
+    assert check["status"] == "failed"
+    assert check["evidence"]["error"] == "metric_insufficient_samples"
+    assert check["evidence"]["sampleCount"] == 2
+
+
+def test_interrupted_profile_cannot_pass_using_partial_samples(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "interrupted": True, "frameCount": 120}
+    scenario = _base_scenario([
+        {"action": "profile-start"},
+        {"action": "profile-stop"},
+        {"action": "assert", "metric": {"name": "frameTimeMs", "atMost": 20}},
+    ])
+    steps = run_scenario(scenario, make_ctx(tmp_path, client))["steps"]
+    assert steps[1]["status"] == "failed"
+    assert steps[1]["evidence"]["code"] == "profile_interrupted"
+    assert steps[2]["status"] == "skipped"
+
+
+def test_performance_example_validates_and_keeps_two_calibration_gates():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    scenario = json.loads((root / "examples/verification/performance/baseline.json").read_text())
+    assert validate_scenario(scenario) == []
+    assert (root / "schemas/scenario.schema.json").read_bytes() == (
+        root / "src/unityctl/unityctl/schemas/scenario.schema.json"
+    ).read_bytes()
+    gates = [step["metric"] for step in scenario["steps"] if "metric" in step]
+    assert {gate["name"] for gate in gates} == {"frameTimeMs", "gcAllocBytes"}
+    assert all(gate["aggregate"] == "p95" and gate["minSamples"] == 180 for gate in gates)
+    assert next(gate for gate in gates if gate["name"] == "frameTimeMs")["greaterThan"] == 0
+    assert next(gate for gate in gates if gate["name"] == "gcAllocBytes")["atLeast"] == 0
+
+
+def test_profile_stop_after_external_stop_does_not_accept_artifact(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "code": "not_profiling", "frameCount": 0}
+    steps = run_scenario(_base_scenario([{"action": "profile-stop"}]), make_ctx(tmp_path, client))["steps"]
+    assert steps[0]["status"] == "failed"
+    assert steps[0]["evidence"]["code"] == "not_profiling"
+
+
+def test_zero_main_thread_time_is_not_usable_but_zero_gc_allocation_is(tmp_path):
+    ctx = make_ctx(tmp_path, FakeClient())
+    metrics = ctx.session_path / "artifacts" / "metrics.jsonl"
+    metrics.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(metrics, [{"frameTimeMs": 0, "gcAllocBytes": 0}])
+    steps = run_scenario(_base_scenario([
+        {"action": "assert", "continueOnFailure": True, "metric": {"name": "frameTimeMs", "atMost": 20}},
+        {"action": "assert", "metric": {"name": "gcAllocBytes", "atMost": 0}},
+    ]), ctx)["steps"]
+    assert steps[0]["status"] == "failed"
+    assert steps[0]["evidence"]["error"] == "metric_not_available"
+    assert steps[1]["status"] == "passed"
+
+
+def test_continuing_after_profile_failure_does_not_validate_partial_metric(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "interrupted": True, "frameCount": 100}
+    ctx = make_ctx(tmp_path, client)
+    metrics = ctx.session_path / "artifacts" / "metrics.jsonl"
+    metrics.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(metrics, [{"frameTimeMs": 10}])
+    scenario = _base_scenario([
+        {"action": "profile-start"},
+        {"action": "profile-stop", "continueOnFailure": True},
+        {"action": "assert", "metric": {"name": "frameTimeMs", "atMost": 20}},
+    ])
+    check = run_scenario(scenario, ctx)["steps"][2]
+    assert check["status"] == "failed"
+    assert check["evidence"]["error"] == "profile_interrupted"
