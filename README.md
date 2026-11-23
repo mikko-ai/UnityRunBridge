@@ -17,7 +17,7 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 用 JSON 文件固化「操作 → 断言」的自动化验证脚本并可重复执行（`unityctl scenario`）。
 - `ProfilerRecorder` 逐帧性能采样，用于改动前后的相对回归比较（`unityctl profile`）。
 - 独立进程执行 Player 构建并生成结构化报告（`unityctl build`）。
-- 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性（`unityctl health`）。
+- 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性与离线资源检查（`unityctl health`）。
 
 Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17890` 开始，被占用会自动顺延），实际端口和鉴权 token 由 Unity 写入项目内的 `.unity-agent/bridge.json` 握手文件，CLI 会自动读取，不需要手动配置。
 
@@ -372,9 +372,10 @@ unityctl build --target StandaloneOSX                     # 独立 batchmode 进
 ```bash
 unityctl health                                            # 跑全部检查项
 unityctl health --check compilation,missing_scripts        # 只跑指定项
+unityctl health --check assets                             # 离线检查 .meta、GUID 与文本脚本引用
 ```
 
-四项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
+五项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）、`assets`（离线资源检查）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
 
 以上各命令的完整参数、错误码和判读规则见内置的 [`unityctl` agent skill](src/unityctl/unityctl/skill_assets/unityctl/SKILL.md)（`unityctl skills init` 后也会安装到你的 Unity 项目里）。
 

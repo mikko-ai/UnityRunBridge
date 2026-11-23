@@ -40,17 +40,19 @@ unityctl build --target Android --output /tmp/out.apk --timeout 1800
 
 ## 项目健康检查（unityctl health）
 
-`unityctl doctor` 回答「环境能不能跑」（Bridge 连通性、UPM 包、进程占用）；`unityctl health` 回答「项目干不干净」（编译、缺失脚本引用、构建场景列表、包一致性）。四个检查项彼此独立，默认全跑，可用 `--check` 只跑指定项：
+`unityctl doctor` 回答「环境能不能跑」（Bridge 连通性、UPM 包、进程占用）；`unityctl health` 回答「项目干不干净」（编译、缺失脚本引用、构建场景列表、包一致性、离线资源）。各检查项彼此独立，默认全跑，可用 `--check` 只跑指定项：
 
 ```bash
 unityctl health                                          # 跑全部四项
 unityctl health --check compilation,missing_scripts      # 只跑指定项（逗号分隔）
 ```
 
-- 四个检查项：
+- 检查项：
   - `compilation`：触发 `refresh` 并等编译完成，编译失败判 `fail`。
   - `missing_scripts`：分两部分——已加载场景（复用 `hierarchy find --missing-script`）+ 项目内**全部** Prefab 资产（异步 job，按 50 个/tick 批处理避免卡主线程，资产数量大也不会卡住 Editor）；命中任一判 `fail`。
   - `build_scenes`：`EditorBuildSettings.scenes` 里指向不存在文件的条目判 `fail`；项目里存在但未加入该列表的 `.unity` 文件判 `warn`（仅提示，不算错误）。
   - `packages`：`Packages/manifest.json` 与 `packages-lock.json` 依赖不一致，或 `ProjectSettings/ProjectVersion.txt` 记录的 Unity 版本与 `config.json` 的 `unityVersion` 不一致，判 `warn`。Core-only 项目未声明 UGUI 是预期行为，不会因此判 fail。
+  - `assets`：可独立运行 `unityctl health --check assets`，不启动 Unity、不连接 Bridge、不写资源文件。扫描 `Assets/` 和嵌入包：无效、重复 GUID 判失败；缺少、孤立或大小写不匹配的 `.meta` 判警告。文本序列化资源仅验证标准 `MonoScript` GUID：缺失包、跳过链接或读取不全时，未找到的引用只判警告；非 YAML、DLL/非标准引用不验证。为解析 GUID 会读取匹配的本地/缓存包代码元数据，不下载包。
+  - 离线结果包含 `issues`（最多 100 条，错误优先）、`issueCount`、`filesChecked`、`unresolvedPackages`、`unchecked`、`truncated`。覆盖不全判警告；需要确认时用 Editor 的 `missing_scripts`，不根据静态猜测重建或替换 GUID。
 - 每项检查独立输出 `{ "name", "status": "pass|warn|fail|skipped", "details": [...] }`；`compilation`/`missing_scripts` 需要 Bridge，Bridge 不可达时该项标记 `skipped` 并在 `details` 里说明原因，**不计入整体失败**（`build_scenes`/`packages` 是纯静态检查，任何时候都能跑，不需要先 `unityctl start`）。
 - 整体 `status` 取所有检查项里最差的一个（`fail` > `warn` > `pass`，`skipped` 不参与比较）；退出码：`pass`/`warn` 为 `0`，`fail` 为 `1`，CI 门禁友好。

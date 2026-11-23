@@ -511,7 +511,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     health = subparsers.add_parser(
         "health",
-        help="项目健康检查（编译/缺失脚本/构建场景列表/包一致性）",
+        help="项目健康检查（编译/缺失脚本/构建场景列表/包一致性/离线资源检查）",
         description=(
             "doctor 回答『环境能不能跑』，health 回答『项目干不干净』：默认跑全部检查项，"
             "可用 --check 只跑指定项。需要 Bridge 的检查项在 Bridge 不可达时标记为 skipped 并说明原因，"
@@ -523,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     health.add_argument(
         "--check",
         metavar="NAME[,NAME...]",
-        help="只运行指定检查项（逗号分隔），可选：compilation,missing_scripts,build_scenes,packages；"
+        help="只运行指定检查项（逗号分隔），可选：compilation,missing_scripts,build_scenes,packages,assets；"
         "缺省运行全部",
     )
     health.add_argument(
