@@ -38,6 +38,10 @@
     "step": {
       "type": "object",
       "required": ["action"],
+      "allOf": [{
+        "if": { "required": ["expectedSize"] },
+        "then": { "properties": { "action": { "enum": ["screenshot", "snapshot"] } } }
+      }],
       "properties": {
         "action": {
           "type": "string",
@@ -122,6 +126,16 @@
         "args": {
           "type": "object",
           "description": "invoke 专用，或 gameplay 条件的调用参数。"
+        },
+        "expectedSize": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          },
+          "description": "screenshot/snapshot 专用：要求必须截图，且输出 PNG 的宽高（像素）与指定值一致。"
         },
         "recordedGap": {
           "type": "number",

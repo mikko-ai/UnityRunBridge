@@ -1126,3 +1126,62 @@ def test_continuing_after_profile_failure_does_not_validate_partial_metric(tmp_p
     check = run_scenario(scenario, ctx)["steps"][2]
     assert check["status"] == "failed"
     assert check["evidence"]["error"] == "profile_interrupted"
+
+
+def test_screenshot_expected_size_is_a_gate_not_an_optional_step(tmp_path):
+    step = {"action": "screenshot", "expectedSize": {"width": 720, "height": 1280}}
+    client = FakeClient()
+    ctx = make_ctx(tmp_path, client, capture_config={"onScenarioStep": False})
+    result = run_scenario(_base_scenario([step]), ctx)["steps"][0]
+    assert result["status"] == "failed"
+    assert result["evidence"]["code"] == "scenario_capture_disabled"
+
+
+@pytest.mark.parametrize("actual, status", [((720, 1280), "passed"), ((1280, 720), "failed"), ((None, None), "failed")])
+def test_screenshot_validates_job_dimensions(tmp_path, actual, status):
+    expected = {"width": 720, "height": 1280}
+    client = FakeClient()
+    client.get_job_handler = lambda _job_id: {
+        "job": {
+            "status": "succeeded", "result": {
+                "path": "/tmp/shot.png", "width": actual[0], "height": actual[1],
+            },
+        },
+    }
+    result = run_scenario(
+        _base_scenario([{"action": "snapshot", "expectedSize": expected}]), make_ctx(tmp_path, client)
+    )["steps"][0]
+    assert result["status"] == status
+    assert result["evidence"]["path"] == "/tmp/shot.png"
+    if status == "failed":
+        assert result["evidence"]["code"] == "screenshot_size_mismatch"
+        assert result["evidence"]["expectedSize"] == expected
+
+
+@pytest.mark.parametrize("size", [None, [], {}, {"width": True, "height": 1}, {"width": 0, "height": 1}])
+def test_screenshot_rejects_invalid_expected_size(size):
+    assert any("expectedSize" in error for error in validate_scenario(
+        _base_scenario([{"action": "screenshot", "expectedSize": size}])
+    ))
+
+
+def test_expected_size_is_only_supported_for_capture_steps():
+    assert validate_scenario(_base_scenario([{"action": "play", "expectedSize": {"width": 1, "height": 1}}]))
+
+
+@pytest.mark.parametrize("label, width, height", [("landscape", 1280, 720), ("portrait", 720, 1280)])
+def test_ui_example_wires_focus_assertions_and_required_screenshots(label, width, height):
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    example = root / "examples/verification/ui"
+    scenario = json.loads((example / f"{label}.json").read_text())
+    assert validate_scenario(scenario) == []
+    steps = {step["id"]: step for step in scenario["steps"] if "id" in step}
+    assert steps["viewport"]["gameplay"]["equals"] == f"{width}x{height}"
+    for test_id, target in (("default-focus", "confirm"), ("restored-focus", "launcher")):
+        assert steps[test_id]["gameplay"]["equals"] == target
+        assert steps[test_id]["gameplay"]["command"].endswith(".UiReviewDemo.FocusedControl")
+    for test_id in ("dialog-open", "dialog-closed"):
+        assert steps[test_id]["expectedSize"] == {"width": width, "height": height}

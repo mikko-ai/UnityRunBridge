@@ -41,7 +41,7 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
     /// </summary>
     public interface IUiAnnotationBackend
     {
-        IReadOnlyList<UiAnnotationElement> CollectAnnotatableElements();
+        IReadOnlyList<UiAnnotationElement> CollectAnnotatableElements(int referenceWidth, int referenceHeight);
     }
 
     /// <summary>

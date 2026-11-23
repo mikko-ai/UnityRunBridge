@@ -42,7 +42,7 @@ scenario 文件结构（`schemas/scenario.schema.json`）：
 
 - 控制类（复用现有能力）：`open-scene` / `play` / `stop` / `pause` / `resume`。
 - 操作类：`click`（含 `force`）/ `input`（含 `submit`）/ `set-value` / `invoke`（gameplay 命令，纯执行不判定）。
-- 观测类：`screenshot` / `snapshot`（受 `config.json` 里 `capture.screenshot.onScenarioStep` 开关控制；关闭时该步骤直接跳过，不算失败）。
+- 观测类：`screenshot` / `snapshot`（受 `config.json` 里 `capture.screenshot.onScenarioStep` 开关控制；关闭时该步骤直接跳过，不算失败；如果步骤指定 `expectedSize: {"width": 1280, "height": 720}`，则必须产生尺寸匹配的 PNG，否则步骤失败）。
 - 性能采样类：`profile-start` / `profile-stop`（对应 `unityctl profile start/stop`，产出 `artifacts/metrics.jsonl`，供后续 `metric` 断言使用；检测到采样中断时 `profile-stop` 失败，已落盘数据只作诊断）。
 - 收敛/断言类：`wait-for`（轮询直到条件成立或超时，超时算步骤失败，`failureType: "timeout"`）/ `assert`（即时判定一次，不通过算 `failureType: "assertion_failed"`）。两者共用同一套条件模型，四选一 `source`：
   - `ui`：`path`（+可选 `scene`）或 `find`（同 `hierarchy find` 的过滤器子集）定位节点/节点集合后判定 `exists` / `activeInHierarchy` / `interactable` / `textEquals` / `textContains`（path 模式），或 `countEquals` / `countAtLeast` / `countAtMost`（find 模式）。
@@ -61,3 +61,9 @@ scenario 文件结构（`schemas/scenario.schema.json`）：
 - `assert` 失败时，若 `config.json` 的 `capture.screenshot.onAssertFailure`（默认 `true`）为真，会自动截图并把路径写进该步骤的 `evidence.screenshotPath`，作为失败证据。
 - 退出码：全部步骤通过为 `0`；任何步骤失败（含 `continueOnFailure: true` 的步骤）为 `1`，CI 友好。
 - `scenario from-recording` 只做机械转换（`recording-meta.json` 的 `activeScene` → 头部 `open-scene` + `play`；`actions.jsonl` 逐条转成 `click`/`input` 步骤，保留 `scene`/`path`，附纯注释字段 `recordedGap`，不自动插 `wait-for`），产出的草稿**不含任何断言**，尾部补一个 `stop`；回放的价值由你在关键节点手工补 `wait-for` 与 `assert`。缺少 `recording-meta.json` 时报错，不做假设。
+
+## UI 回归：分别验证焦点、视口与截图证据
+
+- 用项目侧只读 gameplay 白名单探针读取 EventSystem 当前选中项。测试至少断言弹窗打开后的默认焦点、关闭后回到触发按钮；点击不证明键盘或手柄的导航映射。
+- 在有图形界面的 Game View 选择固定像素尺寸（例如横屏 1280×720、竖屏 720×1280），每个尺寸单独跑一轮。用项目探针确认视口真实大小；截图可能受 `capture.screenshot.maxLongEdge` 限制，另用 `expectedSize` 检查输出 PNG 宽高。
+- 保存弹窗打开、关闭两张图。查看对应步骤的 `evidence.path/width/height`，按图检查遮挡、裁切、文字和焦点样式。尺寸相等不是视觉差分，实际设备和安全区需要单独验收。

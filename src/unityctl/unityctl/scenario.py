@@ -124,6 +124,11 @@ def validate_scenario(scenario: Any) -> list[str]:
                         f"{prefix}: steps 必须是 1 到 {MAX_GESTURE_STEPS} 之间的整数"
                     )
 
+        if "expectedSize" in step and (
+            action not in OBSERVATION_ACTIONS or not _valid_screenshot_size(step["expectedSize"])
+        ):
+            errors.append(f"{prefix}: expectedSize 仅用于截图且需指定正整数 width 与 height")
+
         if "timeoutSeconds" in step and not _is_finite_number_in_range(
             step["timeoutSeconds"], exclusive_min=0
         ):
@@ -171,6 +176,12 @@ def _is_finite_number_in_range(
     if inclusive_max is not None and numeric > inclusive_max:
         return False
     return True
+
+
+def _valid_screenshot_size(value: Any) -> bool:
+    return isinstance(value, dict) and set(value) == {"width", "height"} and all(
+        type(dimension) is int and dimension > 0 for dimension in value.values()
+    )
 
 
 def _validate_condition(source: str, condition: Any, prefix: str) -> list[str]:
@@ -297,9 +308,9 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
 
         if status == "failed":
             if action == "assert" and ctx.capture_config.get("onAssertFailure", True):
-                screenshot_path = _capture_screenshot(ctx, reason="assert_failure")
-                if screenshot_path:
-                    step_result["evidence"] = {**(evidence or {}), "screenshotPath": screenshot_path}
+                screenshot = _capture_screenshot(ctx, reason="assert_failure")
+                if screenshot:
+                    step_result["evidence"] = {**(evidence or {}), "screenshotPath": screenshot["path"]}
             if not step.get("continueOnFailure", False):
                 aborted = True
 
@@ -449,13 +460,25 @@ def _execute_step(
             ctx.profile_issue = None
         return _passthrough_result(response)
 
-    if action in {"screenshot", "snapshot"}:
+    if action in OBSERVATION_ACTIONS:
+        expected = step.get("expectedSize")
         if not ctx.capture_config.get("onScenarioStep", True):
+            if expected is not None:
+                return "failed", "execution_error", {
+                    "code": "scenario_capture_disabled", "message": "此步骤必须截图，但 onScenarioStep 已关闭",
+                }, {}
             return "passed", None, {"skipped": True, "reason": "capture.screenshot.onScenarioStep disabled"}, {}
-        path = _capture_screenshot(ctx, reason="scenario")
-        if path is None:
+        screenshot = _capture_screenshot(ctx, reason="scenario")
+        if screenshot is None:
             return "failed", "execution_error", {"message": "截图失败或超时"}, {}
-        return "passed", None, {"path": path}, {}
+        if expected is not None:
+            actual = {axis: screenshot.get(axis) for axis in ("width", "height")}
+            if not _valid_screenshot_size(actual) or actual != expected:
+                return "failed", "assertion_failed", {
+                    **screenshot, "code": "screenshot_size_mismatch", "expectedSize": expected,
+                    "message": "实际截图尺寸缺失或与 expectedSize 不一致",
+                }, {}
+        return "passed", None, screenshot, {}
 
     if action in CONDITION_ACTIONS:
         source, condition = _extract_source(step)
@@ -590,7 +613,7 @@ def _wait_for_status(ctx: ScenarioContext, predicate: Callable[[dict[str, Any]],
         ctx.sleep_fn(ctx.poll_interval)
 
 
-def _capture_screenshot(ctx: ScenarioContext, reason: str) -> str | None:
+def _capture_screenshot(ctx: ScenarioContext, reason: str) -> dict[str, Any] | None:
     try:
         start_response = ctx.client.capture_screenshot(reason=reason, target_directory=ctx.screenshot_target_directory)
     except BridgeClientError:
@@ -615,7 +638,10 @@ def _capture_screenshot(ctx: ScenarioContext, reason: str) -> str | None:
         return None
     if job.get("status") != "succeeded":
         return None
-    return (job.get("result") or {}).get("path")
+    result = job.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get("path"), str) or not result["path"]:
+        return None
+    return {key: result[key] for key in ("path", "width", "height") if key in result}
 
 
 def evaluate_condition(

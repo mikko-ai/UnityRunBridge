@@ -356,6 +356,8 @@ unityctl scenario run draft.json                          # 执行并生成 sess
 
 scenario 用 JSON 文件把「打开场景 → 操作 UI → 等待收敛 → 断言事实」固化成可重复执行、机器判定通过/失败的脚本；断言判定全部在 CLI 侧完成。字段结构见 `schemas/scenario.schema.json`。
 
+[UI 回归示例](examples/verification/ui/README.md) 使用两种固定分辨率，验证弹窗打开与关闭的焦点变化，并强制保留尺寸正确的 PNG。布局裁切、对比度和实际手柄导航仍需人工验收。
+
 ## 性能采样与 Build 诊断
 
 ```bash

@@ -14,7 +14,7 @@
 
 ## 截图（需 Play Mode）
 
-`unityctl snapshot` 截取当前 Game View 画面并落盘为 PNG，用于给多模态模型看画面或留存证据；底层是异步 job，命令会自动轮询直到完成。
+`unityctl snapshot` 截取当前 Game View 画面并落盘为 PNG，用于给多模态模型看画面或留存证据；底层是异步 job，命令会自动轮询直到完成。需要可读取的 Play Mode 游戏渲染纹理；如果 Game View 不可见或 Unity 无法提供该纹理，命令报错，不改截 Editor 窗口或显示器。
 
 ```bash
 unityctl snapshot                                    # 默认 reason=agent，落到当前 session 的 artifacts/ 或 .unity-agent/scratch/

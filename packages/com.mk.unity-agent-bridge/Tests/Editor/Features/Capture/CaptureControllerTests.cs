@@ -54,6 +54,65 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Capture
         }
 
         [Test]
+        public void ReadGameSurface_UsesTexturePixelsAndRestoresActiveRenderTarget()
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("A graphics device is required for GPU readback.");
+            }
+
+            RenderTexture previous = RenderTexture.active;
+            var surface = RenderTexture.GetTemporary(28, 17, 0, RenderTextureFormat.ARGB32);
+            var unrelated = RenderTexture.GetTemporary(5, 6, 0, RenderTextureFormat.ARGB32);
+            Texture2D result = null;
+            try
+            {
+                RenderTexture.active = surface;
+                GL.Clear(false, true, Color.red);
+                RenderTexture.active = unrelated;
+                result = CaptureController.ReadGameSurface(surface);
+
+                Assert.AreEqual(28, result.width);
+                Assert.AreEqual(17, result.height);
+                Assert.That(result.GetPixel(14, 8).r, Is.GreaterThan(0.9f));
+                Assert.That(result.GetPixel(14, 8).g, Is.LessThan(0.1f));
+                Assert.AreSame(unrelated, RenderTexture.active);
+            }
+            finally
+            {
+                if (result != null)
+                {
+                    Object.DestroyImmediate(result);
+                }
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(unrelated);
+                RenderTexture.ReleaseTemporary(surface);
+            }
+        }
+
+        [Test]
+        public void FlipRows_ReversesYWithoutReversingX()
+        {
+            var image = new Texture2D(2, 3, TextureFormat.RGBA32, false);
+            try
+            {
+                var pixels = image.GetRawTextureData<Color32>();
+                for (int i = 0; i < 6; i++)
+                {
+                    pixels[i] = new Color32((byte)i, 0, 0, 255);
+                }
+                CaptureController.FlipRows(image);
+                CollectionAssert.AreEqual(new byte[] { 4, 5, 2, 3, 0, 1 }, new byte[] {
+                    pixels[0].r, pixels[1].r, pixels[2].r, pixels[3].r, pixels[4].r, pixels[5].r
+                });
+            }
+            finally
+            {
+                Object.DestroyImmediate(image);
+            }
+        }
+
+        [Test]
         public void DeriveSiblingPath_AppendsSuffixBeforeExtension()
         {
             Assert.AreEqual(
@@ -160,7 +219,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Capture
             };
 
             Texture2D annotated = ScreenshotAnnotationRenderer.Render(
-                source, elements, out JsonValue sidecar, out float scale);
+                source, elements, 128, 96, out JsonValue sidecar, out float scale);
             try
             {
                 Assert.IsNotNull(annotated);
@@ -168,6 +227,8 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Capture
                 Assert.AreEqual("image-top-left", sidecar["coordinateSpace"].AsString);
                 Assert.AreEqual(1, sidecar["elements"].Count);
                 Assert.AreEqual("A", sidecar["elements"][0]["label"].AsString);
+                Assert.AreEqual(128, sidecar["referenceScreen"]["width"].AsInt);
+                Assert.AreEqual(96, sidecar["referenceScreen"]["height"].AsInt);
                 float scaleX = sidecar["scaleX"].AsFloat;
                 float scaleY = sidecar["scaleY"].AsFloat;
                 Assert.AreEqual(64f / sidecar["referenceScreen"]["width"].AsFloat, scaleX, 0.0001f);

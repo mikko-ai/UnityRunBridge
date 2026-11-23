@@ -54,13 +54,16 @@ namespace Mk.UnityAgentBridge.Editor.Capture
                 return BridgeResponse.Failure("not_in_play_mode", "hit-test 需要 Play Mode");
             }
 
+            RenderTexture surface = CaptureController.FindGameSurface();
+            int referenceWidth = surface != null ? surface.width : Screen.width;
+            int referenceHeight = surface != null ? surface.height : Screen.height;
             Vector2 screenPoint = ScreenshotAnnotationRenderer.ImageToUnityScreen(
                 (float)x,
                 (float)y,
                 (float)imageWidth,
                 (float)imageHeight,
-                Screen.width,
-                Screen.height);
+                referenceWidth,
+                referenceHeight);
 
             JsonValue response = JsonValue.NewObject();
             response["ok"] = true;
@@ -68,8 +71,8 @@ namespace Mk.UnityAgentBridge.Editor.Capture
             JsonValue screen = JsonValue.NewObject();
             screen["x"] = screenPoint.x;
             screen["y"] = screenPoint.y;
-            screen["width"] = Screen.width;
-            screen["height"] = Screen.height;
+            screen["width"] = referenceWidth;
+            screen["height"] = referenceHeight;
             response["screen"] = screen;
 
             JsonValue ugui = JsonValue.NewObject();
