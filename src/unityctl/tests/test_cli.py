@@ -845,6 +845,22 @@ def test_init_command_writes_project_and_local_config(tmp_path, capsys):
     ).read_text()
 
 
+def test_init_force_help_warns_that_config_is_replaced(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    args = ["--project", str(project), "init"]
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([*args, "--help"])
+    assert exit_info.value.code == 0
+    assert "覆盖已有 config.json / config.local.json" in capsys.readouterr().out
+
+    assert cli.main([*args, "--yes", "--port", "18333"]) == 0
+    assert cli.main([*args, "--yes", "--port", "18444"]) == 0
+    config = project / ".unity-agent" / "config.json"
+    assert json.loads(config.read_text())["bridge"]["preferredPort"] == 18333
+    assert cli.main([*args, "--yes", "--force", "--port", "18444"]) == 0
+    assert json.loads(config.read_text())["bridge"]["preferredPort"] == 18444
+
+
 def test_init_yes_skips_package_install_without_flag(tmp_path, capsys):
     """--yes 非交互模式下不应擅自修改 manifest，只提示后续步骤。"""
     project = make_unity_project(tmp_path / "Game")

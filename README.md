@@ -144,7 +144,7 @@ uv run unityctl --help
 | `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl`（需 UGUI） |
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
-| [`runs list` / `runs show`](docs/unityctl-runs.md) | 在同一入口查看 Scenario、UTF、Midscene 的失败、截图和日志 |
+| [`runs list` / `runs show`](docs/unityctl-runs.md) | 在同一入口查看 Agent、Scenario、UTF、Midscene 的失败、截图和日志 |
 | [`watch` / `agent-run`](docs/unityctl-watch.md) | 本地中文监看：跟随 Scenario 或 Agent 的实际操作，查看理由、命令、截图、点击落点和断言 |
 | [`test run` / `test status`](docs/unityctl-utf.md) | 在独立 Unity 进程运行 UTF EditMode / PlayMode，查询结构化结果 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
@@ -180,7 +180,7 @@ unityctl init
 .unity-agent/.gitignore
 ```
 
-如果已经初始化，`init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，由 `.unity-agent/.gitignore` 忽略（`init` 会维护该文件，缺失才补）。
+如果已经初始化，默认的 `init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。**只有要重置这两个配置时才使用 `--force`，该选项会覆盖已有内容。**`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，由 `.unity-agent/.gitignore` 忽略（`init` 会维护该文件，缺失才补）。
 
 `init` 还会检测 `Packages/manifest.json` 是否已包含 `com.mk.unity-agent-bridge` 依赖：
 

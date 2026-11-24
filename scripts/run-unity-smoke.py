@@ -126,25 +126,74 @@ def click(project, frame, x, y, *, expected="ok", adjust_width=0):
                "--reference-height", reference["height"], expected=expected)
 
 
-def run_visual(base, unity, width, height, *, watch=False, model=False, records=False):
+def verify_delivery_setup(project, unity, upm):
+    package_id = "com.mk.unity-agent-bridge"
+    manifest = project / "Packages/manifest.json"
+    original = manifest.read_bytes()
+    first = cli(project, "init", "--yes", "--unity", unity, "--unity-version", "2022.3.62f2",
+                save="delivery-init-default.json")
+    assert first["packageAction"] == "skipped" and not first["packageInstalled"], first
+    assert manifest.read_bytes() == original
+    assert "unityctl init --install-package" in first["nextSteps"][0], first
+    no_bridge = cli(project, "status", expected="bridge_unreachable", save="delivery-before-editor.json")
+    assert "unityctl start" in no_bridge["message"], no_bridge
+
+    reference = f"file:{upm}"
+    installed = cli(project, "init", "--yes", "--install-package", "--package-ref", reference,
+                    save="delivery-init-install.json")
+    assert installed["packageAction"] == "installed" and installed["packageRef"] == reference, installed
+    assert json.loads(manifest.read_text())["dependencies"][package_id] == reference
+    config = project / ".unity-agent/config.json"
+    local = project / ".unity-agent/config.local.json"
+    snapshots = [item.read_bytes() for item in (manifest, config, local)]
+    repeat = cli(project, "init", "--yes", "--install-package", "--package-ref", "file:/unused.tgz",
+                 save="delivery-init-repeat.json")
+    assert repeat["packageAction"] == "already_installed", repeat
+    assert [item.read_bytes() for item in (manifest, config, local)] == snapshots
+    ignore = (project / ".unity-agent/.gitignore").read_text().splitlines()
+    assert {"config.local.json", "bridge.json", "sessions/", "test-runs/", "visual-runs/"} <= set(ignore)
+    cli(project, "config", "validate", save="delivery-config.json")
+    cli(project, "skills", "init", save="delivery-skills.json")
+    assert (project / ".agents/skills/unityctl/SKILL.md").is_file()
+
+
+def run_visual(base, unity, width, height, *, watch=False, model=False, records=False, upm=None):
     dimensions = f"{width}x{height}"
     project = project_at(base, dimensions, {
-        "com.mk.unity-agent-bridge": f"file:{BRIDGE}", "com.unity.ugui": "1.0.0",
+        **({"com.mk.unity-agent-bridge": f"file:{BRIDGE}"} if upm is None else {}),
+        "com.unity.ugui": "1.0.0",
         **({"com.unity.test-framework": "1.1.33"} if records else {}),
     })
+    if upm is not None:
+        verify_delivery_setup(project, unity, upm)
     (project / "Assets/Editor").mkdir()
     (project / "Assets/Scenes").mkdir()
     (project / "game-view-size.txt").write_text(dimensions)
     shutil.copyfile(FIXTURES / "PrepareGameView.cs", project / "Assets/Editor/PrepareGameView.cs")
     shutil.copyfile(ROOT / "examples/verification/ui/UiReviewDemo.cs", project / "Assets/UiReviewDemo.cs")
-    write_json(project / ".unity-agent/config.json", {
+    config = project / ".unity-agent/config.json"
+    demo_settings = {
         "gameplay": {"enabled": True, "whitelist": [FOCUS]},
-        "capture": {"screenshot": {"enabled": True, "allowAgentRequest": True}},
-    })
+        "capture": {"screenshot": {"enabled": True, "allowAgentRequest": True, "agentImageAccess": "allow"}},
+    }
+    if upm is None:
+        write_json(config, demo_settings)
     editor = subprocess.Popen([str(unity), "-projectPath", str(project), "-logFile", str(project / "editor.log"), "-executeMethod", "PrepareGameView.Setup"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for_editor(project, editor, dimensions)
+        if upm is not None:
+            package = json.loads((project / "Packages/packages-lock.json").read_text())["dependencies"]["com.mk.unity-agent-bridge"]
+            assert package["source"] == "local-tarball", package
+            start = cli(project, "start", save="delivery-editor-reuse.json")
+            assert start["pid"] == editor.pid and start["code"] == "already_running", start
+            cli(project, "doctor", save="delivery-doctor.json")
+            cli(project, "snapshot", expected="capture_requires_play_mode", save="delivery-capture-in-edit.json")
+            cli(project, "play", "--session", "delivery-defaults")
+            cli(project, "gameplay", "invoke", FOCUS, expected="gameplay_disabled", save="delivery-gameplay-default.json")
+            cli(project, "stop", "--latest")
+            current = json.loads(config.read_text())
+            write_json(config, {**current, **demo_settings})
         if watch:
             verify_watch(project)
             return
@@ -153,6 +202,7 @@ def run_visual(base, unity, width, height, *, watch=False, model=False, records=
             return
         if records:
             verify_watch(project)
+            verify_agent_watch(project)
             verify_offline_record(project)
             return project
         cli(project, "play", "--session", "coordinate-smoke")
@@ -251,6 +301,55 @@ def verify_watch(project):
         terminate(watcher)
 
 
+def verify_agent_watch(project):
+    # CI uses the known center of the synthetic demo, not a vision model.
+    command = [sys.executable, "-m", "unityctl.cli", "--project", str(project)]
+    run = cli(project, "agent-run", "start", "--name", "agent-delivery")
+    session_id = run["sessionId"]
+    watcher = subprocess.Popen([*command, "watch", "--session-id", session_id],
+                               stdout=subprocess.PIPE, text=True)
+    try:
+        url = json.loads(watcher.stdout.readline())["url"]
+
+        def step(why, *command, options=(), expected="ok"):
+            return cli(project, "agent-run", "step", "--session-id", session_id, "--why", why,
+                       *options, "--", *command, expected=expected)
+
+        step("进入合成弹窗场景", "play")
+        shot = step("保留点击前画面", "snapshot", "--max-long-edge", "640")
+        reference = shot["referenceScreen"]
+        click_options = ("--frame", Path(shot["path"]).name)
+        click_args = ("click-at", "--x", shot["width"] / 2, "--y", shot["height"] / 2,
+                      "--image-width", shot["width"], "--image-height", shot["height"],
+                      "--reference-width", reference["width"], "--reference-height", reference["height"])
+        assert step("测试合成场景已知按钮落点", *click_args, options=click_options)["clicked"] == "ReviewCanvas/Open"
+        step("旧帧不能用于重放", *click_args, options=click_options, expected="agent_run_unavailable")
+        step("保留弹窗出现后的画面", "snapshot", "--max-long-edge", "640")
+        check = step("核对焦点探针", "gameplay", "invoke", FOCUS, options=("--expect", 'result="confirm"'))
+        assert check["verification"]["actual"] == "confirm" and check["verification"]["passed"]
+        with urlopen(url + "state", timeout=5) as response:
+            live = json.load(response)
+        assert live["sessionId"] == session_id and live["status"] == "running", live
+        assert live["editor"]["state"] == "playing", live
+        click_event = next(row for row in live["events"] if row.get("marker"))
+        assert click_event["why"] == "测试合成场景已知按钮落点", click_event
+        assert click_event["command"].startswith("unityctl click-at "), click_event
+        assert click_event["marker"] == {"x": .5, "y": .5}, click_event
+        assert any(row.get("verification", {}).get("passed") for row in live["events"]), live
+        with urlopen(url + f"frame/{quote(session_id)}/{quote(click_event['frame'])}", timeout=5) as response:
+            assert response.read(8) == b"\x89PNG\r\n\x1a\n"
+        write_json(project / "agent-watch-live-evidence.json", live)
+        step("退出演示 Play Mode", "stop")
+        assert cli(project, "agent-run", "finish", "--session-id", session_id)["status"] == "passed"
+        record = cli(project, "runs", "show", f"agent:{session_id}", save="unified-agent.json")["record"]
+        assert len(record["steps"]) == 6 and record["status"] == "passed", record
+        assert any(row.get("verification", {}).get("actual") == "confirm" for row in record["steps"])
+        assert any(row.get("marker") and Path(row["screenshot"]).is_file() for row in record["steps"])
+        print("agent-delivery: live intent, actual command, click marker and verification; history preserved", flush=True)
+    finally:
+        terminate(watcher)
+
+
 def verify_live_model(project):
     cli(project, "play", "--session", "midscene-model")
     node_script = ROOT / "examples/midscene-game-view/model-acceptance.mjs"
@@ -285,11 +384,11 @@ def verify_offline_record(project):
         cli(project, "stop", "--latest", save="offline-stop.json")
 
 
-def verify_run_index(work, unity):
-    project = run_visual(work / "records", unity, 1280, 720, records=True)
+def verify_run_index(work, unity, upm=None):
+    project = run_visual(work / "records", unity, 1280, 720, records=True, upm=upm)
     run_utf(work, unity, project=project)
     listing = cli(project, "runs", "list", "--limit", 20, save="unified-list.json")
-    assert {item["kind"] for item in listing["runs"]} == {"scenario", "utf", "midscene"}, listing
+    assert {item["kind"] for item in listing["runs"]} == {"agent", "scenario", "utf", "midscene"}, listing
     expected = {
         "scenario": {"report", "log", "screenshot"},
         "utf": {"report", "log", "nunit"},
@@ -302,13 +401,14 @@ def verify_run_index(work, unity):
         assert artifacts <= {entry["kind"] for entry in record["artifacts"]}, record
         if kind != "utf":
             assert Path(record["failures"][0]["screenshot"]).is_file(), record
-    print("Combined run index: Scenario, UTF and Midscene failures with local evidence", flush=True)
+    print("Combined run index: Agent, Scenario, UTF and Midscene local evidence", flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "model", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
+    parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，delivery 专用")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
     args = parser.parse_args()
@@ -316,6 +416,8 @@ def main():
         parser.error("run this smoke test without Python optimization (assertions must be active)")
     if args.suite == "model" and (not args.allow_model_requests or not os.environ.get("MIDSCENE_MODEL_NAME")):
         parser.error("model requires --allow-model-requests and MIDSCENE_MODEL_NAME")
+    if args.suite == "delivery" and (not args.upm or args.upm.suffix != ".tgz" or not args.upm.is_file()):
+        parser.error("delivery requires --upm pointing to a local .tgz")
     unity = args.unity
     if unity and unity.suffix == ".app":
         unity /= "Contents/MacOS/Unity"
@@ -333,6 +435,8 @@ def main():
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
     if args.suite == "records":
         verify_run_index(work, unity.resolve())
+    if args.suite == "delivery":
+        verify_run_index(work, unity.resolve(), args.upm.resolve())
     if args.suite == "model":
         run_visual(work / "model", unity.resolve(), 1280, 720, model=True)
 

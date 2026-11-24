@@ -12,7 +12,7 @@
 
 ## 运行结束后查证据
 
-- `unityctl runs list` 列出当前项目的 Scenario、UTF 和 Midscene 记录；可用 `--kind scenario|utf|midscene` 和 `--limit N` 缩小范围。
+- `unityctl runs list` 列出当前项目的 Agent、Scenario、UTF 和 Midscene 记录；可用 `--kind agent|scenario|utf|midscene` 和 `--limit N` 缩小范围。
 - 从列表复制 `key`，执行 `unityctl runs show KEY`。外层 `ok: true` 只表示查询成功；验收必须看 `record.status`，再读失败步骤及其 `screenshot`、日志和报告路径。
 - Midscene 的 `mode: offline` 是无模型回放，不代表模型已通过视觉验收。旧的孤立 HTML 如果没有运行元数据，不会自动入索引。
 

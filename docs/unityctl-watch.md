@@ -47,3 +47,5 @@ unityctl agent-run finish --session-id "$SID"
 ```
 
 该示例的 Gameplay 探针需按弹窗示例说明启用。只在独立测试项目开放探针。监看显示主动提供的操作理由、实际执行的命令、点击标记和依 CLI JSON 自动比较的预期/实际结果；不记录内部推理。若没有成功的结构化断言，结束状态为“未断言”，不是“已通过”。出错后不要自动重试点击；再次点击前重新截图。不要在理由、探针命名或参数里写入秘密。暂不监听 Agent 在记录命令之外的行为。
+
+历史 Agent 会话同样支持 `unityctl runs list --kind agent` 和 `unityctl runs show agent:ID`。

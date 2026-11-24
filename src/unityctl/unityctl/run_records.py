@@ -1,4 +1,4 @@
-"""Read Scenario, UTF and Midscene evidence from one project-local index."""
+"""Read Agent, Scenario, UTF and Midscene evidence from one project-local index."""
 
 import json
 import re
@@ -8,8 +8,11 @@ from typing import Any
 
 from unityctl.config import SESSIONS_DIRNAME, TEST_RUNS_DIRNAME, VISUAL_RUNS_DIRNAME
 from unityctl.discovery import is_pid_alive
+from unityctl.run_events import EVENT_FILE
+from unityctl.watch import _run_status, read_events
 
 _SOURCES = {
+    "agent": (SESSIONS_DIRNAME, "session.json"),
     "scenario": (SESSIONS_DIRNAME, "session.json"),
     "utf": (TEST_RUNS_DIRNAME, "test-report.json"),
     "midscene": (VISUAL_RUNS_DIRNAME, "run-record.json"),
@@ -100,7 +103,39 @@ def _read(directory: Path, kind: str, *, details: bool) -> dict[str, Any]:
             record["artifacts"].append(entry)
         return entry["path"] if entry else None
 
-    if kind == "scenario":
+    if kind == "agent":
+        if meta.get("trigger") != "agent" or meta.get("sessionId") != directory.name:
+            raise RunRecordError("该会话不是 Agent 运行")
+        event_file = _under(directory, directory / EVENT_FILE)
+        if event_file is None:
+            raise RunRecordError("Agent 会话没有可读取的事件")
+        events = read_events(directory)
+        if not events or events[0].get("type") != "run-started" or events[0].get("kind") != "agent":
+            raise RunRecordError("Agent 会话事件缺少起点")
+        record["name"] = meta.get("name") or directory.name
+        record["status"] = _run_status(events)
+        if details:
+            add("session.json", "session")
+            add(EVENT_FILE, "events")
+            by_step = {}
+            for event in events:
+                index = event.get("stepIndex")
+                if type(index) is not int or index < 0 or event.get("type") not in {"step-started", "step-finished"}:
+                    continue
+                row = by_step.setdefault(index, {"stepIndex": index})
+                for key in ("id", "action", "status", "why", "command", "code", "clicked", "verification"):
+                    if key in event:
+                        row[key] = event[key]
+                frame = event.get("frame")
+                if isinstance(frame, str) and Path(frame).name == frame and Path(frame).suffix.lower() == ".png":
+                    row["screenshot"] = add(frame, "screenshot", within=directory / "artifacts")
+                    if row["screenshot"] and isinstance(event.get("marker"), dict):
+                        row["marker"] = event["marker"]
+            record["steps"] = [row for _, row in sorted(by_step.items())]
+            if record["status"] == "interrupted" and record["steps"] and record["steps"][-1].get("status") == "running":
+                record["steps"][-1]["status"] = "interrupted"
+            record["failures"] = [row for row in record["steps"] if row.get("status") in {"failed", "interrupted"}]
+    elif kind == "scenario":
         if meta.get("trigger") != "scenario" or meta.get("sessionId") != directory.name:
             raise RunRecordError("该会话不是 Scenario 运行")
         record["name"] = meta.get("name") or directory.name
@@ -205,7 +240,7 @@ def list_runs(project: Path, kind: str | None, limit: int) -> dict:
             try:
                 records.append(_read(path, source, details=False))
             except RunRecordError:
-                # Non-scenario play sessions, empty dirs and unrelated output are not part of the index.
+                # Manual play sessions, empty dirs and unrelated output are not part of the index.
                 pass
             except (OSError, ValueError, TypeError):
                 unreadable += 1
@@ -216,7 +251,7 @@ def list_runs(project: Path, kind: str | None, limit: int) -> dict:
 def show_run(project: Path, key: str) -> dict:
     kind, separator, run_id = key.partition(":")
     if not separator or kind not in _SOURCES or not _ID.fullmatch(run_id):
-        raise RunRecordError("运行 ID 应为 scenario:<id>、utf:<id> 或 midscene:<id>")
+        raise RunRecordError("运行 ID 应为 agent:<id>、scenario:<id>、utf:<id> 或 midscene:<id>")
     root = _root(project, kind)
     if root is None:
         raise RunRecordError("没有该运行")

@@ -192,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--force",
         action="store_true",
-        help="重新生成缺失的配置文件（不覆盖已有 config.json / config.local.json）",
+        help="用初始值覆盖已有 config.json / config.local.json；常规补文件请不要使用",
     )
     package_group = init.add_mutually_exclusive_group()
     package_group.add_argument(
@@ -1010,11 +1010,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--session-id", help="固定会话 ID；不指定则跟随最新可监看的 Scenario")
     watch.add_argument("--port", type=int, default=0, help="本机端口；默认随机分配")
 
-    runs = subparsers.add_parser("runs", help="统一查询 Scenario、UTF 和 Midscene 运行记录")
+    runs = subparsers.add_parser("runs", help="统一查询 Agent、Scenario、UTF 和 Midscene 运行记录")
     _add_project_option(runs)
     run_records = runs.add_subparsers(dest="runs_command", required=True)
     runs_list = run_records.add_parser("list", help="按时间列出本机运行")
-    runs_list.add_argument("--kind", choices=("scenario", "utf", "midscene"))
+    runs_list.add_argument("--kind", choices=("agent", "scenario", "utf", "midscene"))
     runs_list.add_argument("--limit", type=int, default=20, help="最多显示 1–200 条")
     runs_show = run_records.add_parser("show", help="查看失败步骤、截图及日志文件")
     runs_show.add_argument("key", metavar="KIND:ID")
@@ -2470,7 +2470,7 @@ def print_json(payload: dict[str, Any], stream: Any = None) -> None:
 def confirm_init(project_path: Path, force: bool = False) -> None:
     if not sys.stdin.isatty():
         raise ValueError("init 需要确认项目路径；在脚本中请添加 --yes")
-    action = "重新生成缺失或已有配置" if force else "初始化缺失配置"
+    action = "覆盖已有 config.json / config.local.json" if force else "初始化缺失配置"
     print(f"将为以下 Unity 项目{action}：", file=sys.stderr)
     print(str(project_path), file=sys.stderr)
     answer = input("是否继续？[y/N] ").strip().lower()

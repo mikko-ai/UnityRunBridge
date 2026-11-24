@@ -39,6 +39,14 @@ def test_agent_trace_links_live_intent_command_click_and_verified_result(tmp_pat
     assert invoke(*base, *args)[0] == 1  # A click invalidates the old frame; never automatically replay it.
     assert invoke(*base, "--expect", 'result="confirm"', "--", "gameplay", "invoke", "Demo.Focus")[0] == 0
     assert invoke("finish", "--session-id", ident)[1]["status"] == "passed"
+    assert cli.main(["--project", str(tmp_path), "runs", "list", "--kind", "agent"]) == 0
+    assert json.loads(capsys.readouterr().out)["runs"][0]["key"] == f"agent:{ident}"
+    assert cli.main(["--project", str(tmp_path), "runs", "show", f"agent:{ident}"]) == 0
+    indexed = json.loads(capsys.readouterr().out)["record"]
+    assert indexed["status"] == "passed"
+    assert indexed["steps"][1]["marker"] == {"x": .25, "y": .25}
+    assert indexed["steps"][1]["screenshot"] == str(session / "artifacts/screenshot-1.png")
+    assert indexed["steps"][2]["verification"]["actual"] == "confirm"
     rows = read_events(session)
     assert rows[1]["why"] == "核对弹窗行为" and rows[1]["command"].startswith("unityctl snapshot")
     assert rows[4]["marker"] == {"x": .25, "y": .25}
