@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
 from unityctl.jobs import JobFailed, JobTimeout, poll_job_with_client
+from unityctl.run_events import click_marker, frame_name
 from unityctl.summary import read_jsonl
 
 
@@ -239,6 +240,7 @@ class ScenarioContext:
     now_fn: Callable[[], float] = time.monotonic
     screenshot_target_directory: str | None = None
     job_wait_fn: Callable[[str, float, bool], dict[str, Any]] | None = None
+    event_sink: Callable[[str, dict[str, Any]], None] | None = None
     profile_issue: str | None = field(default=None, init=False, repr=False)
 
 
@@ -259,13 +261,25 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
     for index, step in enumerate(steps):
         action = step["action"]
 
+        metadata = {"stepIndex": index, "action": action, "id": step.get("id") or f"step-{index}"}
         if aborted:
             results.append(_skipped_result(index, step))
+            if ctx.event_sink is not None:
+                ctx.event_sink("step-finished", {**metadata, "status": "skipped"})
             continue
 
+        if ctx.event_sink is not None:
+            ctx.event_sink("step-started", {**metadata, "status": "running"})
         step_start_sequence = _current_log_sequence(ctx.session_path)
         step_start_sequence_by_index[index] = step_start_sequence
 
+        observed_frame = None
+        if ctx.event_sink is not None and action == "click" and ctx.capture_config.get("onScenarioStep", True):
+            # Capture before dispatch: clicks can replace or hide the target immediately.
+            observed_frame = _capture_screenshot(ctx, reason="scenario")
+            frame = frame_name(ctx.session_path, observed_frame)
+            if frame:
+                ctx.event_sink("step-frame", {**metadata, "status": "running", "frame": frame})
         start = ctx.now_fn()
         try:
             status, failure_type, evidence, extra = _execute_step(
@@ -313,6 +327,24 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
                     step_result["evidence"] = {**(evidence or {}), "screenshotPath": screenshot["path"]}
             if not step.get("continueOnFailure", False):
                 aborted = True
+
+        if ctx.event_sink is not None:
+            safe_evidence = step_result["evidence"] or {}
+            event = {**metadata, "status": status, "durationMs": duration_ms}
+            if failure_type:
+                event["failureType"] = failure_type
+            for key in ("code", "clicked"):
+                if isinstance(safe_evidence.get(key), str):
+                    event[key] = safe_evidence[key]
+            frame = frame_name(ctx.session_path, safe_evidence)
+            if frame:
+                event["frame"] = frame
+            if action == "click" and status == "passed" and observed_frame:
+                marker = click_marker(safe_evidence.get("screenPoint"), observed_frame.get("referenceScreen"))
+                click_frame = frame_name(ctx.session_path, observed_frame)
+                if marker and click_frame:
+                    event.update(frame=click_frame, marker=marker)
+            ctx.event_sink("step-finished", event)
 
     _teardown(ctx, entered_play, defaults)
 
@@ -641,7 +673,7 @@ def _capture_screenshot(ctx: ScenarioContext, reason: str) -> dict[str, Any] | N
     result = job.get("result")
     if not isinstance(result, dict) or not isinstance(result.get("path"), str) or not result["path"]:
         return None
-    return {key: result[key] for key in ("path", "width", "height") if key in result}
+    return {key: result[key] for key in ("path", "width", "height", "referenceScreen") if key in result}
 
 
 def evaluate_condition(

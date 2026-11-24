@@ -7,15 +7,12 @@ using UnityEngine;
 using UnityRunBridge.Examples;
 
 // Test fixture only. The reflection below is tied to Unity 2022.3's Game View.
-[InitializeOnLoad]
-internal static class PrepareGameView
+public static class PrepareGameView
 {
     private const BindingFlags Members = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
     private const string ScenePath = "Assets/Scenes/UiReview.unity";
 
-    static PrepareGameView() => EditorApplication.delayCall += Setup;
-
-    private static void Setup()
+    public static void Setup()
     {
         if (File.Exists("game-view-ready.txt")) return;
         try

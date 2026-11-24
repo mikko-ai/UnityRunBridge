@@ -1185,3 +1185,25 @@ def test_ui_example_wires_focus_assertions_and_required_screenshots(label, width
         assert steps[test_id]["gameplay"]["command"].endswith(".UiReviewDemo.FocusedControl")
     for test_id in ("dialog-open", "dialog-closed"):
         assert steps[test_id]["expectedSize"] == {"width": width, "height": height}
+
+
+def test_run_scenario_observes_start_before_bridge_action_and_preserves_failure(tmp_path):
+    client = FakeClient()
+    events = []
+
+    def fail_click(**_params):
+        assert events[-1][0] == "step-started" and events[-1][1]["status"] == "running"
+        return {"ok": False, "code": "occluded", "message": "private log detail"}
+
+    client.interaction_click_handler = fail_click
+    ctx = make_ctx(tmp_path, client, event_sink=lambda kind, row: events.append((kind, row)))
+    result = run_scenario(_base_scenario([
+        {"action": "click", "path": "A", "id": "blocked"},
+        {"action": "screenshot", "id": "not-run"},
+    ]), ctx)
+    assert result["status"] == "failed"
+    assert [(kind, row["status"]) for kind, row in events] == [
+        ("step-started", "running"), ("step-finished", "failed"), ("step-finished", "skipped"),
+    ]
+    assert events[1][1]["code"] == "occluded"
+    assert "message" not in events[1][1]

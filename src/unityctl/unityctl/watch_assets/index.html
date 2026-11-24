@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>UnityRunBridge · 实时监看</title>
+  <link rel="stylesheet" href="watch.css">
+  <script defer src="watch.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">UnityRunBridge / 本机只读</p>
+      <h1>实时监看</h1>
+      <p id="run-name" class="muted">尚无监看会话</p>
+    </div>
+    <div class="statuses">
+      <span class="pill" id="editor">Bridge 查询中</span>
+      <span class="pill" id="run-status" role="status">等待任务</span>
+    </div>
+  </header>
+  <main class="workspace">
+    <section class="panel" aria-labelledby="screen-title">
+      <div class="panel-head">
+        <h2 id="screen-title" tabindex="-1">Game View</h2>
+        <button id="follow" type="button" hidden>返回最新画面</button>
+      </div>
+      <div class="stage">
+        <p id="placeholder" class="muted">等待步骤截图</p>
+        <div class="projection" id="projection" hidden>
+          <img id="frame" alt="本次 Unity Scenario 的 Game View 截图">
+          <svg id="marker" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" hidden>
+            <circle cx="0" cy="0" r="18" vector-effect="non-scaling-stroke" />
+            <path d="M-32,0 H32 M0,-32 V32" vector-effect="non-scaling-stroke" />
+          </svg>
+        </div>
+      </div>
+      <p id="frame-caption" class="caption muted">按步骤更新，不是视频直播。</p>
+    </section>
+    <section class="panel" aria-labelledby="timeline-title">
+      <div class="panel-head"><h2 id="timeline-title">步骤记录</h2><span id="step-count" class="muted"></span></div>
+      <ol id="steps" class="steps"></ol>
+      <p id="timeline-empty" class="empty muted">启动带 <code>--observe</code> 的 Scenario 后，步骤会自动显示。</p>
+    </section>
+  </main>
+  <footer class="muted">截图和步骤留在本机。点击有截图的步骤可回看失败现场或点击落点。</footer>
+</body>
+</html>

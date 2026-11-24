@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import quote
+from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "scripts" / "fixtures" / "smoke"
@@ -123,7 +125,7 @@ def click(project, frame, x, y, *, expected="ok", adjust_width=0):
                "--reference-height", reference["height"], expected=expected)
 
 
-def run_visual(base, unity, width, height):
+def run_visual(base, unity, width, height, *, watch=False):
     dimensions = f"{width}x{height}"
     project = project_at(base, dimensions, {
         "com.mk.unity-agent-bridge": f"file:{BRIDGE}", "com.unity.ugui": "1.0.0",
@@ -137,10 +139,13 @@ def run_visual(base, unity, width, height):
         "gameplay": {"enabled": True, "whitelist": [FOCUS]},
         "capture": {"screenshot": {"enabled": True, "allowAgentRequest": True}},
     })
-    editor = subprocess.Popen([str(unity), "-projectPath", str(project), "-logFile", str(project / "editor.log")],
+    editor = subprocess.Popen([str(unity), "-projectPath", str(project), "-logFile", str(project / "editor.log"), "-executeMethod", "PrepareGameView.Setup"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for_editor(project, editor, dimensions)
+        if watch:
+            verify_watch(project)
+            return
         cli(project, "play", "--session", "coordinate-smoke")
         before = capture(project, width, height, "before")
         x, y = before["width"] / 2, before["height"] / 2
@@ -158,18 +163,88 @@ def run_visual(base, unity, width, height):
         cli(project, "stop", "--latest", save="stop.json")
         print(f"{dimensions}: coordinate clicks, stale size and blocking overlay verified", flush=True)
     finally:
-        if editor.poll() is None:
-            editor.terminate()
-            try:
-                editor.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                editor.kill()
-                editor.wait()
+        terminate(editor)
+
+
+def terminate(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def verify_watch(project):
+    command = [sys.executable, "-m", "unityctl.cli", "--project", str(project)]
+    watcher = subprocess.Popen([*command, "watch"], stdout=subprocess.PIPE, text=True)
+    try:
+        url = json.loads(watcher.stdout.readline())["url"]
+        for expected in ("passed", "failed"):
+            steps = [
+                {"action": "open-scene", "scene": "Assets/Scenes/UiReview.unity"},
+                {"action": "play"},
+                {"action": "screenshot", "id": "before-click"},
+                {"action": "click", "id": "open-dialog", "path": "ReviewCanvas/Open"},
+                {"action": "assert", "id": "check-focus", "gameplay": {
+                    "command": FOCUS, "equals": "confirm" if expected == "passed" else "impossible",
+                }},
+                {"action": "screenshot", "id": "after-click"},
+                {"action": "stop"},
+            ]
+            scenario = project / f"watch-{expected}.json"
+            write_json(scenario, {"name": f"watch-{expected}", "steps": steps})
+            with (project / f"watch-{expected}-cli.json").open("w") as out:
+                run = subprocess.Popen(
+                    [*command, "scenario", "run", str(scenario), "--observe"],
+                    stdout=out, stderr=subprocess.STDOUT,
+                )
+                try:
+                    observed_live = False
+                    observed_live_marker = False
+                    deadline = time.monotonic() + 60
+                    while time.monotonic() < deadline:
+                        with urlopen(url + "state", timeout=4) as response:
+                            state = json.load(response)
+                        events = state["events"]
+                        this_run = events and events[0].get("name") == f"watch-{expected}"
+                        if this_run and state["status"] == "running" and run.poll() is None:
+                            observed_live |= any(row["type"] == "step-started" for row in events)
+                            observed_live_marker |= any(row.get("marker") for row in events)
+                        if this_run and state["status"] in {"passed", "failed", "interrupted"}:
+                            break
+                        time.sleep(.08)
+                    else:
+                        raise TimeoutError(f"watch did not show a final status: {state}")
+                    assert run.wait(timeout=15) == (0 if expected == "passed" else 1)
+                    assert observed_live and observed_live_marker, events
+                    assert state["status"] == expected, state
+                    marker = next(row for row in events if row.get("marker"))
+                    assert marker["id"] == "open-dialog", marker
+                    assert all(abs(marker["marker"][axis] - .5) < .02 for axis in ("x", "y")), marker
+                    frame = next(row for row in reversed(events) if row.get("frame"))
+                    assert frame["id"] == ("after-click" if expected == "passed" else "check-focus"), frame
+                    if expected == "failed":
+                        assert frame["status"] == "failed", frame
+                    frame_url = url + f"frame/{quote(state['sessionId'])}/{quote(frame['frame'])}"
+                    with urlopen(frame_url, timeout=4) as response:
+                        assert response.read(8) == b"\x89PNG\r\n\x1a\n"
+                    write_json(project / f"watch-{expected}-evidence.json", {
+                        "observedRunningBeforeExit": observed_live,
+                        "observedClickMarkerBeforeExit": observed_live_marker,
+                        "state": state,
+                    })
+                    print(f"watch-{expected}: live steps, click marker, final frame and replay verified", flush=True)
+                finally:
+                    terminate(run)
+    finally:
+        terminate(watcher)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "all"))
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
     args = parser.parse_args()
@@ -188,6 +263,8 @@ def main():
     if args.suite in {"visual", "all"}:
         for width, height in ((1280, 720), (720, 1280)):
             run_visual(work, unity.resolve(), width, height)
+    if args.suite in {"watch", "all"}:
+        run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
 
 
 if __name__ == "__main__":

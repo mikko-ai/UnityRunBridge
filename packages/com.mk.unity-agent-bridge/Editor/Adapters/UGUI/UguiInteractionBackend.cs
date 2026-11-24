@@ -174,7 +174,8 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 Clicked = downHandlerGo != null ? downHandlerGo : target,
                 RaycastHit = hitObject,
                 Events = events,
-                Forced = force
+                Forced = force,
+                ScreenPoint = pointerData.position
             };
         }
 

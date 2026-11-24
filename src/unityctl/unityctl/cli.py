@@ -67,6 +67,8 @@ from unityctl.skills import (
     install_all_skills,
     resolve_skills_dir,
 )
+from unityctl.run_events import RunEvents
+from unityctl.watch import create_watch_server
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
 
 
@@ -1000,6 +1002,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="全局缩放 wait-for/assert/收敛等待的超时秒数（CI 环境偏慢时可调大）",
     )
 
+    scenario_run.add_argument("--observe", action="store_true", help="在 session 中记录实时步骤事件")
+
+    watch = subparsers.add_parser("watch", help="在本机浏览器实时查看 Scenario 进度")
+    _add_project_option(watch)
+    watch.add_argument("--session-id", help="固定会话 ID；不指定则跟随最新可监看的 Scenario")
+    watch.add_argument("--port", type=int, default=0, help="本机端口；默认随机分配")
+
     scenario_validate = scenario_subparsers.add_parser(
         "validate",
         help="只做字段/结构校验，不连接 Bridge、不创建 session",
@@ -1114,6 +1123,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "doctor": cmd_doctor,
         "build": cmd_build,
         "test": cmd_test,
+        "watch": cmd_watch,
         "build-size": cmd_build_size,
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
@@ -2030,9 +2040,11 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
     client.start_session(session.session_id, str(session.session_path))
     update_session_status(session.session_path, "running", started_at=format_time(utc_now()))
 
+    events = RunEvents(session.session_path) if getattr(args, "observe", False) else None
     ctx = ScenarioContext(
         client=client,
         session_path=session.session_path,
+        event_sink=events.emit if events else None,
         capture_config=_load_capture_config(effective.project_path),
         timeout_scale=args.timeout_scale,
         screenshot_target_directory=str(session.session_path / "artifacts"),
@@ -2046,12 +2058,24 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     try:
+        if events:
+            events.emit("run-started", {"name": session_name, "status": "running", "stepsTotal": len(scenario_data["steps"])})
         result = run_scenario(scenario_data, ctx)
+    except KeyboardInterrupt as exc:
+        if events:
+            events.emit("run-finished", {"status": "interrupted", "code": "scenario_interrupted"})
+        _abort_bridge_session(client)
+        _finalize_failed_session(session.session_path, effective.project_path, "scenario_interrupted")
+        raise CliError("scenario_interrupted", "Scenario 已由调用者中断") from exc
     except ScenarioValidationError as exc:
+        if events:
+            events.emit("run-finished", {"status": "failed", "code": "invalid_scenario"})
         _abort_bridge_session(client)
         _finalize_failed_session(session.session_path, effective.project_path, "invalid_scenario")
         raise CliError("invalid_scenario", "; ".join(exc.errors)) from exc
     except Exception as exc:  # noqa: BLE001 - 任何未预期异常都要保证 session 收尾落盘，而不是留下悬空 session
+        if events:
+            events.emit("run-finished", {"status": "failed", "code": "scenario_execution_error"})
         _abort_bridge_session(client)
         _finalize_failed_session(session.session_path, effective.project_path, "scenario_execution_error")
         raise CliError("scenario_execution_error", str(exc)) from exc
@@ -2069,6 +2093,8 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
         session.session_path, load_log_rules(effective.project_path), scenario_result=result
     )
     write_summary(session.session_path, summary_payload)
+    if events:
+        events.emit("run-finished", {"status": result["status"]})
 
     return {
         "ok": result["status"] == "passed",
@@ -2178,6 +2204,23 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
 
     overall_ok = all(check["ok"] for check in checks)
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
+
+
+def cmd_watch(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.project_path or Path.cwd())
+    if not 0 <= args.port <= 65535:
+        raise CliError("invalid_argument", "端口必须在 0 至 65535 之间")
+    try:
+        server, url = create_watch_server(project, args.port, args.session_id)
+    except (OSError, ValueError) as exc:
+        raise CliError("watch_unavailable", str(exc)) from exc
+    with server:
+        print(json.dumps({"ok": True, "url": url}, ensure_ascii=False), flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    return {"ok": True, "code": "ok", "status": "stopped"}
 
 
 def cmd_test(args: argparse.Namespace) -> dict[str, Any]:

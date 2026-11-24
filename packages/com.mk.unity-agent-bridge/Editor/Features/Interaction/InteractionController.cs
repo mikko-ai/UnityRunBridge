@@ -38,6 +38,9 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                 return BridgeResponse.Failure(resolved.ErrorCode, resolved.ErrorMessage);
             }
 
+            var surface = CaptureController.FindGameSurface();
+            var referenceWidth = surface != null ? surface.width : 0;
+            var referenceHeight = surface != null ? surface.height : 0;
             PointerSimulator.ClickResult result = PointerSimulator.SimulateClick(
                 resolved.Node.gameObject, force, services);
             if (!result.Ok)
@@ -70,6 +73,15 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             }
 
             response["events"] = eventsArray;
+            if (result.ScreenPoint is Vector2 point && referenceWidth > 0 && referenceHeight > 0)
+            {
+                JsonValue position = JsonValue.NewObject();
+                position["x"] = point.x;
+                position["y"] = point.y;
+                position["width"] = referenceWidth;
+                position["height"] = referenceHeight;
+                response["screenPoint"] = position;
+            }
             return response;
         }
 

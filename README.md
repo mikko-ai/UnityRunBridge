@@ -144,6 +144,7 @@ uv run unityctl --help
 | `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl`（需 UGUI） |
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
+| [`watch`](docs/unityctl-watch.md) | 本地中文监看：跟随启用 `--observe` 的 Scenario、截图与点击落点 |
 | [`test run` / `test status`](docs/unityctl-utf.md) | 在独立 Unity 进程运行 UTF EditMode / PlayMode，查询结构化结果 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
 | `build-size` | 离线分析构建大小、交付预算和资源导入线索 |

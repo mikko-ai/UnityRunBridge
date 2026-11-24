@@ -130,6 +130,12 @@ jobs:
           uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
           visual --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
+      - name: Run live observer smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
+        run: >-
+          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          watch --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
+
       - name: Upload smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -144,6 +150,7 @@ jobs:
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/before.json
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/opened.json
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/closed.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/watch-*-evidence.json
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/*.png
           include-hidden-files: true
           if-no-files-found: warn
