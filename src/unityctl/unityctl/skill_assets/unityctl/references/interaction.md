@@ -7,10 +7,10 @@
 | 命令 | 所需 capability | 项目可选依赖 |
 |------|-----------------|--------------|
 | `snapshot` | `capture` | 无（Core） |
-| `click` / `input` / `set-value` | `interaction` | `com.unity.ugui` |
+| `click` / `click-at` / `input` / `set-value` | `interaction` | `com.unity.ugui` |
 | `record` | `recording` | `com.unity.ugui`（指针后端另需 Legacy Input 或 Input System） |
 
-缺 UGUI 时 Bridge 不声明 `interaction`/`recording`，CLI 返回 `bridge_capability_missing`。完整安装约 **30 路由 / 9 capability**；Core-only（NoUGUI）约 **24 / 7**。TMP 文本控件需额外安装 `com.unity.textmeshpro`；Input System 项目请将 Active Input Handling 设为 Input System Package 或 Both。
+缺 UGUI 时 Bridge 不声明 `interaction`/`recording`，CLI 返回 `bridge_capability_missing`。完整安装约 **34 路由 / 9 capability**；Core-only（NoUGUI）约 **25 / 7**。TMP 文本控件需额外安装 `com.unity.textmeshpro`；Input System 项目请将 Active Input Handling 设为 Input System Package 或 Both。
 
 ## 截图（需 Play Mode）
 
@@ -24,6 +24,17 @@ unityctl snapshot --max-long-edge 800                # 单次覆盖输出长边�
 
 - 只在 Play Mode 且非 batchmode 下可用；受 `config.json` 里 `capture.screenshot` 配置项管控：`enabled`（总开关）、`allowAgentRequest`（是否允许 `reason=agent` 的主动请求）、`maxPerSession`（配额）、`maxLongEdge`（默认输出长边像素上限）、`agentImageAccess`（`allow`/`deny`，约定多模态模型是否可读取截图内容，Bridge 不做强制）。
 - 输出的 `path` 字段是 PNG 的绝对路径；是否把这张图喂给自己（多模态读取）应遵循 `agentImageAccess` 的约定。
+
+## 从截图像素点击（需 Play Mode + UGUI）
+
+先运行 `unityctl snapshot` 获取原始 PNG 的 `width` / `height` 和未缩放的 `referenceScreen.width` / `referenceScreen.height`。点击图像左上坐标系中的点；不要把 `referenceScreen` 尺寸当作截图尺寸。读取或传输给模型前核对 `agentImageAccess`，该字段不是上传授权。
+
+```bash
+# 示例：640×360 PNG 来自 1280×720 Game View；将像素和尺寸替换为本次截图的值
+unityctl click-at --x 320 --y 180 --image-width 640 --image-height 360 --reference-width 1280 --reference-height 720
+```
+
+只向最上层 UGUI 射线命中派发事件，不搜索遮挡层下面的按钮；不支持 `--force`。收到 `game_view_resized` 时重新截图、重新定位；其他点击失败不要无条件重试（指针事件可能已经派发）。尺寸相同不代表页面没变，操作后要核对结果。能确定目标节点路径时优先使用 `click`。
 
 ## UI 操作（点击/输入/设值，需 Play Mode + UGUI）
 

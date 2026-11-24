@@ -13,6 +13,10 @@ on:
         description: 'Unity matrix set (pr|full)'
         required: false
         default: 'pr'
+      visual_smoke:
+        description: 'Run Game View smoke (requires an active macOS desktop)'
+        type: boolean
+        default: false
 
 # 禁止任何 job 静默跳过 Unity 测试；runner 固定为预激活 self-hosted，无 hosted fallback。
 env:
@@ -106,6 +110,68 @@ jobs:
           path: .tmp/logs/matrix/*.log
           if-no-files-found: warn
           retention-days: 14
+
+  unity-smoke:
+    name: UTF and Game View smoke
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run UTF smoke
+        run: >-
+          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          utf --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
+
+      - name: Run Game View smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
+        run: >-
+          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          visual --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/test-report.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/results.xml
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/unity.log
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/editor.log
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/game-view-ready.txt
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/before.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/opened.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/closed.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  midscene-adapter:
+    name: Midscene adapter (no model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/midscene-game-view
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/midscene-game-view/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run adapter tests
+        run: npm test
 
   package-upm:
     name: Package UPM

@@ -45,7 +45,7 @@ EOF
   rm -f "$target/Packages/packages-lock.json"
 }
 
-# 默认完整 fixture：显式安装 ugui，保证 interaction/recording Adapter 可编译（33 routes / 9 capabilities）。
+# 默认完整 fixture：显式安装 ugui，保证 interaction/recording Adapter 可编译（34 routes / 9 capabilities）。
 if [[ "$UNITY_PROJECT" == "$DEFAULT_FIXTURE" ]]; then
   echo "使用仓库内临时 Unity project（完整 UGUI fixture）：$UNITY_PROJECT"
   seed_project_settings "$UNITY_PROJECT"

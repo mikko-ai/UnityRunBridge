@@ -11,7 +11,8 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 触发脚本重编译并等待结果（`unityctl refresh`）。
 - 诊断本机环境与 Bridge 连通性（`unityctl doctor`）。
 - 只读查询场景 Hierarchy 结构（`unityctl hierarchy`）与 Play Mode 截图（`unityctl snapshot`）。
-- 在安装 UGUI 时模拟点击 / 输入 / 设值（`click` / `input` / `set-value`），带射线遮挡验证。
+- 在安装 UGUI 时支持按节点或 Game View 截图坐标点击，以及输入 / 设值（`click` / `click-at` / `input` / `set-value`）。
+- 可选 [Midscene Game View 示例](examples/midscene-game-view/README.md)：从 Play Mode 截图定位、点击 UGUI 并做视觉断言，不引入第二套 Bridge。
 - 零侵入调用游戏侧暴露的命令（`unityctl gameplay`，默认关闭）。
 - 录制 UGUI 语义动作为 `actions.jsonl`（`unityctl record`，需 UGUI），供复盘或生成 scenario 草稿。
 - 用 JSON 文件固化「操作 → 断言」的自动化验证脚本并可重复执行（`unityctl scenario`）。
@@ -20,6 +21,8 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性与离线资源检查（`unityctl health`）。
 
 Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17890` 开始，被占用会自动顺延），实际端口和鉴权 token 由 Unity 写入项目内的 `.unity-agent/bridge.json` 握手文件，CLI 会自动读取，不需要手动配置。
+
+[Unity 2022.3 回归验收](docs/unity-2022-smoke.md)：可复跑 UTF、横竖屏截图与坐标点击，并提取失败证据。
 
 ## 环境要求
 
@@ -65,12 +68,12 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 
 | 安装组合 | 典型可选依赖 | 路由 / capability | 说明 |
 |----------|--------------|-------------------|------|
-| Core-only（NoUGUI） | 无 | **24 / 7** | 无 `interaction`、`recording`；`hierarchy`/`capture`/`profiling`/`health` 等仍可用 |
-| UGUI + Legacy Input | `com.unity.ugui` | **30 / 9** | 含 `interaction`、`recording`；指针走 Legacy Input Manager |
-| UGUI + Input System | `ugui` + `com.unity.inputsystem` | **30 / 9** | Player Settings 中 Active Input Handling 设为 Input System Package 或 Both |
-| UGUI + Both | 同上 + Legacy 仍启用 | **30 / 9** | 两套指针后端并存时 Input System 优先（Priority 更高） |
-| UGUI + TMP | `ugui` + `com.unity.textmeshpro` | **30 / 9** | TMP 文本 / `TMP_InputField` / `TMP_Dropdown` 富化；需导入 TMP Essential Resources |
-| Full | `ugui` + TMP + Input System | **30 / 9** | 仓库测试矩阵的完整组合 |
+| Core-only（NoUGUI） | 无 | **25 / 7** | 无 `interaction`、`recording`；`hierarchy`/`capture`/`profiling`/`health` 等仍可用 |
+| UGUI + Legacy Input | `com.unity.ugui` | **34 / 9** | 含 `interaction`、`recording`；指针走 Legacy Input Manager |
+| UGUI + Input System | `ugui` + `com.unity.inputsystem` | **34 / 9** | Player Settings 中 Active Input Handling 设为 Input System Package 或 Both |
+| UGUI + Both | 同上 + Legacy 仍启用 | **34 / 9** | 两套指针后端并存时 Input System 优先（Priority 更高） |
+| UGUI + TMP | `ugui` + `com.unity.textmeshpro` | **34 / 9** | TMP 文本 / `TMP_InputField` / `TMP_Dropdown` 富化；需导入 TMP Essential Resources |
+| Full | `ugui` + TMP + Input System | **34 / 9** | 仓库测试矩阵的完整组合 |
 
 - 缺 UGUI 时执行 `click` / `input` / `set-value` / `record`，CLI 返回 `bridge_capability_missing`（不是笼统 404）。
 - 示例 manifest：[`examples/unity-project-manifest/`](examples/unity-project-manifest/)（`core-only.json`、`ugui-legacy.json`、`ugui-inputsystem.json`、`ugui-tmp.json`、`full.json`）。
@@ -135,11 +138,13 @@ uv run unityctl --help
 | `doctor` | 诊断项目配置与 Bridge 连通性 |
 | `hierarchy roots/tree/find/ancestors/inspect` | 只读查询场景 Hierarchy 结构 |
 | `snapshot` | Play Mode 截图（落盘 PNG） |
+| `click-at` | 按截图像素点击最上层 UGUI 命中点；Game View 尺寸变化时拒绝执行 |
 | `click` / `input` / `set-value` | 模拟 UGUI 点击 / 输入 / 设值（需 Play Mode，且项目已安装 UGUI） |
 | `gameplay list` / `gameplay invoke` | 零侵入调用游戏侧暴露的命令（默认关闭） |
 | `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl`（需 UGUI） |
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
+| [`test run` / `test status`](docs/unityctl-utf.md) | 在独立 Unity 进程运行 UTF EditMode / PlayMode，查询结构化结果 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
 | `build-size` | 离线分析构建大小、交付预算和资源导入线索 |
 | `health` | 项目健康检查（编译/缺失脚本/构建场景/包一致性） |

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from unityctl import __version__
+from unityctl.utf import UtfError, read_test_job, run_tests
 from unityctl.build import BuildError, run_build
 from unityctl.build_size import analyze_build_size
 from unityctl.build_size_scan import SUPPORTED_PLATFORMS, scan_build_assets
@@ -698,6 +699,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="截图/图像高度",
     )
 
+    click_at = subparsers.add_parser(
+        "click-at",
+        help="按 Game View 截图像素点击 UGUI（需 Play Mode）",
+    )
+    _add_project_option(click_at)
+    for coordinate in ("x", "y"):
+        click_at.add_argument(f"--{coordinate}", type=float, required=True, help="图像坐标（左上原点）")
+    for dimension in ("image-width", "image-height", "reference-width", "reference-height"):
+        click_at.add_argument(f"--{dimension}", type=int, required=True)
+
     click_cmd = subparsers.add_parser(
         "click",
         help="点击 UGUI 节点（需 Play Mode）",
@@ -1051,6 +1062,18 @@ def build_parser() -> argparse.ArgumentParser:
             ),
         )
 
+    test = subparsers.add_parser("test", help="运行 Unity Test Framework 并查询任务结果")
+    _add_project_option(test)
+    test_commands = test.add_subparsers(dest="test_command", required=True)
+    test_run = test_commands.add_parser("run", help="启动独立 Unity 进程并等待 UTF 完成")
+    test_run.add_argument("--mode", choices=("EditMode", "PlayMode"), required=True)
+    test_run.add_argument("--filter", help="Unity -testFilter 表达式")
+    test_run.add_argument("--job-id", help="预先指定任务 ID，供另一个进程查询")
+    test_run.add_argument("--timeout", type=float, default=900, help="超时（秒）")
+    test_run.add_argument("--unity", type=Path, help="临时覆盖 Unity Editor 路径")
+    test_status = test_commands.add_parser("status", help="读取已开始的任务或最终报告")
+    test_status.add_argument("job_id")
+
     return parser
 
 
@@ -1090,12 +1113,14 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "refresh": cmd_refresh,
         "doctor": cmd_doctor,
         "build": cmd_build,
+        "test": cmd_test,
         "build-size": cmd_build_size,
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
         "snapshot": cmd_snapshot,
         "hit-test": cmd_hit_test,
         "click": cmd_click,
+        "click-at": cmd_click_at,
         "input": cmd_input,
         "set-value": cmd_set_value,
         "long-press": cmd_long_press,
@@ -1730,6 +1755,7 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "annotatedPath",
         "annotationsPath",
         "coordinateSpace",
+        "agentImageAccess",
         "referenceScreen",
         "scale",
         "annotationMeta",
@@ -1749,6 +1775,26 @@ def cmd_hit_test(args: argparse.Namespace) -> dict[str, Any]:
         y=args.y,
         image_width=args.image_width,
         image_height=args.image_height,
+    )
+
+
+def cmd_click_at(args: argparse.Namespace) -> dict[str, Any]:
+    dimensions = (args.image_width, args.image_height, args.reference_width, args.reference_height)
+    if not all(0 < dim <= 2**31 - 1 for dim in dimensions) or not (
+        0 <= args.x < args.image_width and 0 <= args.y < args.image_height
+    ):
+        raise CliError("invalid_argument", "尺寸必须为正整数，坐标必须位于截图内")
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "interaction", "POST", "interaction/click-at")
+    return client.interaction_click_at(
+        x=args.x,
+        y=args.y,
+        image_width=args.image_width,
+        image_height=args.image_height,
+        reference_width=args.reference_width,
+        reference_height=args.reference_height,
     )
 
 
@@ -2132,6 +2178,19 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
 
     overall_ok = all(check["ok"] for check in checks)
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
+
+
+def cmd_test(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        if args.test_command == "status":
+            return read_test_job(find_unity_project_root(args.project_path or Path.cwd()), args.job_id)
+        effective = resolve_effective_config(project_path=args.project_path)
+        return run_tests(
+            effective.project_path, args.unity or effective.unity_executable_path,
+            mode=args.mode, test_filter=args.filter, job_id=args.job_id, timeout=args.timeout,
+        )
+    except UtfError as exc:
+        raise CliError(exc.code, str(exc)) from exc
 
 
 def cmd_build(args: argparse.Namespace) -> dict[str, Any]:

@@ -38,6 +38,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             ("POST", "interaction/set-value"),
             ("POST", "interaction/long-press"),
             ("POST", "interaction/drag"),
+            ("POST", "interaction/click-at"),
             ("GET", "gameplay/commands"),
             ("POST", "gameplay/invoke"),
             ("POST", "recording/start"),
@@ -107,7 +108,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
 
             IReadOnlyList<(string Method, string Path)> actual = RouteTable.ListRoutes();
 
-            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 33");
+            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 34");
             for (int i = 0; i < FullInstallRoutes.Length; i++)
             {
                 Assert.AreEqual(FullInstallRoutes[i].Method, actual[i].Method, $"route[{i}].method");

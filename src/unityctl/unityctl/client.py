@@ -120,6 +120,19 @@ class BridgeClient:
             payload["scene"] = scene
         return self.post("interaction/click", payload)
 
+    def interaction_click_at(
+        self, *, x: float, y: float, image_width: int, image_height: int,
+        reference_width: int, reference_height: int,
+    ) -> dict[str, Any]:
+        return self.post("interaction/click-at", {
+            "x": x,
+            "y": y,
+            "imageWidth": image_width,
+            "imageHeight": image_height,
+            "referenceWidth": reference_width,
+            "referenceHeight": reference_height,
+        })
+
     def interaction_input(
         self,
         path: str,

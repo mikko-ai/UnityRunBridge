@@ -35,6 +35,11 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
         bool ComputeEffectiveInteractable(GameObject target);
     }
 
+    public interface ICoordinateClickBackend
+    {
+        InteractionOperationResult ClickAt(Vector2 screenPoint);
+    }
+
     /// <summary>
     /// UI 标注收集契约：扫描当前场景中可交互且射线可达的 UI 元素，
     /// 返回不含可选包类型的 DTO。无 UGUI Adapter 时 Features 走降级路径。

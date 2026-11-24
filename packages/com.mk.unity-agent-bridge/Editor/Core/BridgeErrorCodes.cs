@@ -47,6 +47,8 @@ namespace Mk.UnityAgentBridge.Editor
             ["node_inactive"] = 409,
             ["occluded"] = 409,
             ["no_click_handler"] = 422,
+            ["click_not_dispatched"] = 409,
+            ["game_view_resized"] = 409,
             ["not_interactable"] = 409,
             ["not_input_field"] = 422,
             ["unsupported_set_value"] = 422,
