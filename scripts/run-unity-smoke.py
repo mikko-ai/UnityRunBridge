@@ -125,7 +125,7 @@ def click(project, frame, x, y, *, expected="ok", adjust_width=0):
                "--reference-height", reference["height"], expected=expected)
 
 
-def run_visual(base, unity, width, height, *, watch=False):
+def run_visual(base, unity, width, height, *, watch=False, model=False):
     dimensions = f"{width}x{height}"
     project = project_at(base, dimensions, {
         "com.mk.unity-agent-bridge": f"file:{BRIDGE}", "com.unity.ugui": "1.0.0",
@@ -145,6 +145,9 @@ def run_visual(base, unity, width, height, *, watch=False):
         wait_for_editor(project, editor, dimensions)
         if watch:
             verify_watch(project)
+            return
+        if model:
+            verify_live_model(project)
             return
         cli(project, "play", "--session", "coordinate-smoke")
         before = capture(project, width, height, "before")
@@ -242,14 +245,38 @@ def verify_watch(project):
         terminate(watcher)
 
 
+def verify_live_model(project):
+    cli(project, "play", "--session", "midscene-model")
+    node_script = ROOT / "examples/midscene-game-view/model-acceptance.mjs"
+    unityctl = Path(sys.executable).with_name("unityctl")
+    # Keep reports and cache local to this synthetic run; never archive this suite in ordinary CI.
+    environment = {**os.environ, "MIDSCENE_RUN_DIR": str(project / "midscene_run")}
+    try:
+        with (project / "model-acceptance.log").open("w", encoding="utf-8") as out:
+            result = subprocess.run(
+                ["node", str(node_script), str(project), str(unityctl), "--allow-model-requests"],
+                cwd=project, env=environment, stdout=out, stderr=subprocess.STDOUT, timeout=180, check=False,
+            )
+    finally:
+        cli(project, "stop", "--latest", save="model-stop.json")
+    if result.returncode != 0:
+        raise RuntimeError("Midscene 验收失败；请在本机查看 model-acceptance.log")
+    if not list((project / "midscene_run" / "report").glob("*.html")):
+        raise RuntimeError("Midscene 未生成 HTML 报告")
+    print("Midscene model: tap, positive assertion and expected negative verified", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "model", "all"))
+    parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
     args = parser.parse_args()
     if not __debug__:
         parser.error("run this smoke test without Python optimization (assertions must be active)")
+    if args.suite == "model" and (not args.allow_model_requests or not os.environ.get("MIDSCENE_MODEL_NAME")):
+        parser.error("model requires --allow-model-requests and MIDSCENE_MODEL_NAME")
     unity = args.unity
     if unity and unity.suffix == ".app":
         unity /= "Contents/MacOS/Unity"
@@ -265,6 +292,8 @@ def main():
             run_visual(work, unity.resolve(), width, height)
     if args.suite in {"watch", "all"}:
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
+    if args.suite == "model":
+        run_visual(work / "model", unity.resolve(), 1280, 720, model=True)
 
 
 if __name__ == "__main__":
