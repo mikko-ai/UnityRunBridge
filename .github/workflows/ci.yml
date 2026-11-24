@@ -119,15 +119,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install the built CLI wheel
+        run: |
+          out="$GITHUB_WORKSPACE/.tmp/ci-smoke-wheel/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          uv build --wheel src/unityctl --out-dir "$out"
+          uv venv "$out/venv"
+          uv pip install --no-deps --python "$out/venv/bin/python" "$out"/*.whl
+          "$out/venv/bin/python" -c 'from importlib.resources import files; w = files("unityctl").joinpath("watch_assets"); assert all(w.joinpath(name).is_file() for name in ("index.html", "watch.css", "watch.js"))'
+          echo "UNITYCTL_CI_PYTHON=$out/venv/bin/python" >> "$GITHUB_ENV"
+
       - name: Run UTF smoke
         run: >-
-          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          "$UNITYCTL_CI_PYTHON" scripts/run-unity-smoke.py
           utf --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Run Game View smoke
         if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
         run: >-
-          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          "$UNITYCTL_CI_PYTHON" scripts/run-unity-smoke.py
           visual --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Set up Node for optional GUI evidence
@@ -146,7 +155,7 @@ jobs:
       - name: Run live observer and unified records smoke (no model)
         if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
         run: >-
-          uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
+          "$UNITYCTL_CI_PYTHON" scripts/run-unity-smoke.py
           records --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Upload smoke evidence

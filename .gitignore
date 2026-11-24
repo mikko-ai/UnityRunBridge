@@ -73,3 +73,6 @@ __pycache__/
 .env.*.local
 
 tmp_refs/
+
+# Python wheel build staging
+/src/unityctl/build/
