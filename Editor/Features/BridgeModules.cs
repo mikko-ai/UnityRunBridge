@@ -136,6 +136,10 @@ namespace Mk.UnityAgentBridge.Editor
             routes.Map("POST", "interaction/set-value", ctx => InteractionController.SetValue((BridgeRequestContext)ctx, captured));
             routes.Map("POST", "interaction/long-press", ctx => InteractionGestureRunner.StartLongPress((BridgeRequestContext)ctx, captured));
             routes.Map("POST", "interaction/drag", ctx => InteractionGestureRunner.StartDrag((BridgeRequestContext)ctx, captured));
+            if (services.TryGet(out ICoordinateClickBackend _))
+            {
+                routes.Map("POST", "interaction/click-at", ctx => InteractionController.ClickAt((BridgeRequestContext)ctx, captured));
+            }
         }
     }
 

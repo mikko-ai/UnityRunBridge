@@ -3,6 +3,7 @@ using Mk.UnityAgentBridge.Editor.Contracts;
 using Mk.UnityAgentBridge.Editor.Hierarchy;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
 {
@@ -10,7 +11,7 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
     /// UGUI 交互后端：射线验证 + StandaloneInputModule.ProcessMousePress 最小等价语义派发。
     /// 从旧 PointerSimulator 迁入。
     /// </summary>
-    internal sealed class UguiInteractionBackend : IInteractionBackend
+    internal sealed class UguiInteractionBackend : IInteractionBackend, ICoordinateClickBackend
     {
         public InteractionOperationResult Click(GameObject target, bool force)
         {
@@ -89,6 +90,49 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 dispatchRoot = hitObject;
             }
 
+            return DispatchClick(dispatchRoot, target, hitObject, pointerData, force);
+        }
+
+        public InteractionOperationResult ClickAt(Vector2 screenPoint)
+        {
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem == null)
+            {
+                return InteractionOperationResult.Fail("no_event_system", "scene 中没有可用的 EventSystem");
+            }
+
+            PointerEventData pointerData = BuildPointerEventData(screenPoint);
+            List<RaycastResult> hits = new List<RaycastResult>();
+            eventSystem.RaycastAll(pointerData, hits);
+            if (hits.Count == 0 || !(hits[0].module is GraphicRaycaster) || hits[0].gameObject == null)
+            {
+                return InteractionOperationResult.Fail("no_click_handler", "当前位置最上层没有 UGUI 射线命中");
+            }
+
+            RaycastResult hit = hits[0];
+            GameObject responder = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hit.gameObject);
+            GameObject pressHandler = ExecuteEvents.GetEventHandler<IPointerDownHandler>(hit.gameObject);
+            if (responder == null || (pressHandler != null && pressHandler != responder))
+            {
+                return InteractionOperationResult.Fail("no_click_handler", "最上层命中链没有可派发的点击处理器");
+            }
+
+            if (!UguiGeometry.ComputeEffectiveInteractable(responder))
+            {
+                return InteractionOperationResult.Fail("not_interactable", "目标节点当前不可交互");
+            }
+
+            pointerData.pointerCurrentRaycast = hit;
+            pointerData.pointerPressRaycast = hit;
+            InteractionOperationResult result = DispatchClick(hit.gameObject, responder, hit.gameObject, pointerData, false);
+            return result.Events.Contains("pointerClick")
+                ? result
+                : InteractionOperationResult.Fail("click_not_dispatched", "指针事件已处理，但目标未收到 pointerClick");
+        }
+
+        private static InteractionOperationResult DispatchClick(
+            GameObject dispatchRoot, GameObject target, GameObject hitObject, PointerEventData pointerData, bool force)
+        {
             pointerData.eligibleForClick = true;
             List<string> events = new List<string>();
 
@@ -114,9 +158,9 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 events.Add("pointerUp");
 
                 GameObject clickAtUpGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(dispatchRoot);
-                if (clickAtUpGo == downHandlerGo)
+                if (clickAtUpGo == downHandlerGo &&
+                    ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerClickHandler))
                 {
-                    ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerClickHandler);
                     events.Add("pointerClick");
                 }
             }

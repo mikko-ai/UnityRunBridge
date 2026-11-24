@@ -23,6 +23,7 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
 
             services.Add<INodeEnricher>(enricher, enricher.Priority);
             services.Add<ITextControlAdapter>(text, text.Priority);
+            // The registry resolves implemented contracts from this single instance.
             services.Add<IInteractionBackend>(interaction, 100);
             services.Add<IRecordingSemanticBackend>(recording, 100);
             services.Add<IUiAnnotationBackend>(annotation, 100);

@@ -83,7 +83,7 @@ namespace Mk.UnityAgentBridge.Editor.Capture
 
             JobStartResult start = JobManager.StartJob(
                 "screenshot",
-                handle => RunCaptureJob(handle, outputPath, maxLongEdge, annotate, services),
+                handle => RunCaptureJob(handle, outputPath, maxLongEdge, annotate, settings.AgentImageAccess, services),
                 timeoutSeconds: 10);
             if (!start.Ok)
             {
@@ -101,6 +101,7 @@ namespace Mk.UnityAgentBridge.Editor.Capture
             string outputPath,
             int maxLongEdge,
             bool annotate,
+            string agentImageAccess,
             IBridgeServiceResolver services)
         {
             EditorApplication.QueuePlayerLoopUpdate();
@@ -139,7 +140,14 @@ namespace Mk.UnityAgentBridge.Editor.Capture
                     {
                         ["path"] = outputPath,
                         ["width"] = width,
-                        ["height"] = height
+                        ["height"] = height,
+                        ["coordinateSpace"] = "image-top-left",
+                        ["agentImageAccess"] = agentImageAccess,
+                        ["referenceScreen"] = new Dictionary<string, object>
+                        {
+                            ["width"] = captured.width,
+                            ["height"] = captured.height
+                        }
                     };
 
                     if (annotate)
@@ -255,19 +263,9 @@ namespace Mk.UnityAgentBridge.Editor.Capture
             File.WriteAllBytes(annotatedPath, annotated.EncodeToPNG());
             File.WriteAllText(annotationsPath, sidecar.ToString());
 
-            sidecar.TryGetObject("referenceScreen", out JsonValue referenceScreen);
             result["annotatedPath"] = annotatedPath;
             result["annotationsPath"] = annotationsPath;
-            result["coordinateSpace"] = sidecar.GetString("coordinateSpace", "image-top-left");
             result["scale"] = scale;
-            if (referenceScreen != null)
-            {
-                result["referenceScreen"] = new Dictionary<string, object>
-                {
-                    ["width"] = referenceScreen.GetDouble("width", 0),
-                    ["height"] = referenceScreen.GetDouble("height", 0)
-                };
-            }
 
             result["annotationMeta"] = new Dictionary<string, object>
             {
