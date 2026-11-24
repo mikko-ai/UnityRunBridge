@@ -18,6 +18,7 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             public GameObject RaycastHit;
             public List<string> Events;
             public bool Forced;
+            public Vector2? ScreenPoint;
 
             public static ClickResult Fail(string code, string message)
             {
@@ -46,11 +47,13 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                 return failure;
             }
 
-            return ClickResult.Success(
+            var success = ClickResult.Success(
                 result.Clicked,
                 result.RaycastHit,
                 result.Events ?? new List<string>(),
                 result.Forced);
+            success.ScreenPoint = result.ScreenPoint;
+            return success;
         }
     }
 }

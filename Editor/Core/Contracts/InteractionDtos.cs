@@ -28,6 +28,8 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
         /// <summary>是否为 force 点击。</summary>
         public bool Forced;
 
+        public Vector2? ScreenPoint;
+
         public static InteractionOperationResult Fail(string code, string message)
         {
             return new InteractionOperationResult { Ok = false, ErrorCode = code, ErrorMessage = message };
