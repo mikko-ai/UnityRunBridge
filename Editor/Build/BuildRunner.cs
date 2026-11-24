@@ -13,13 +13,14 @@ namespace Mk.UnityAgentBridge.Editor.Build
     /// 调用（必须是 public static，供 Unity 反射调用）。完全独立于 Bridge/HTTP：CLI 直接 spawn
     /// 一个新的 Unity 进程做构建，不与正在跑的 Editor 实例共享任何状态。目标平台由 Unity 原生
     /// `-buildTarget &lt;target&gt;` 决定（不自定义参数），保证脚本编译符号与目标平台一致——
-    /// 本类只读 `-agentBuildOutput`/`-agentReportPath` 两个自定义参数、执行构建、写报告 JSON，
+    /// 本类读取输出路径、报告路径和可选的 clean build 标记，执行构建并写报告 JSON，
     /// 并显式调用 <see cref="EditorApplication.Exit"/> 控制退出码
     /// （BuildPipeline.BuildPlayer 失败不会让进程天然返回非 0）。
     /// </summary>
     public static class BuildRunner
     {
         private const string BuildOutputArg = "-agentBuildOutput";
+        private const string CleanBuildArg = "-agentCleanBuild";
         private const string ReportPathArg = "-agentReportPath";
 
         public static void Build()
@@ -52,7 +53,7 @@ namespace Mk.UnityAgentBridge.Editor.Build
                     locationPathName = outputPath,
                     target = target,
                     targetGroup = BuildPipeline.GetBuildTargetGroup(target),
-                    options = BuildOptions.None,
+                    options = ResolveBuildOptions(Environment.GetCommandLineArgs()),
                 };
 
                 BuildReport report = BuildPipeline.BuildPlayer(options);
@@ -68,6 +69,11 @@ namespace Mk.UnityAgentBridge.Editor.Build
                 WriteFailureReport(reportPath, ex.Message);
                 EditorApplication.Exit(1);
             }
+        }
+
+        internal static BuildOptions ResolveBuildOptions(string[] args)
+        {
+            return Array.IndexOf(args, CleanBuildArg) >= 0 ? BuildOptions.CleanBuildCache : BuildOptions.None;
         }
 
         internal static string[] GetEnabledScenePaths()

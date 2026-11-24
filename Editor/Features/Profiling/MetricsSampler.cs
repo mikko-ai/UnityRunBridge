@@ -12,7 +12,7 @@ namespace Mk.UnityAgentBridge.Editor.Profiling
     /// 与 <see cref="Recording.RecordingListener"/> 同样用 <see cref="EditorApplication.update"/>
     /// 驱动而不是 MonoBehaviour：Editor-only 程序集无法把脚本挂到 GameObject 上。
     /// 计数器在不同 Unity 版本/渲染管线下可能不存在（<see cref="ProfilerRecorder.Valid"/> == false），
-    /// 此时不采样该项、记入 <see cref="UnavailableMetrics"/>，绝不让 recorder 静默返回 0。
+    /// 此时不采样该项、记入 <see cref="UnavailableMetrics"/>。已找到但尚无数据的计数器也不输出占位 0。
     /// </summary>
     internal static class MetricsSampler
     {
@@ -106,6 +106,10 @@ namespace Mk.UnityAgentBridge.Editor.Profiling
 
             foreach (KeyValuePair<string, ProfilerRecorder> entry in ActiveRecorders)
             {
+                if (entry.Value.Count == 0)
+                {
+                    continue;
+                }
                 long raw = entry.Value.LastValue;
                 sample[entry.Key] = FindDefinition(entry.Key).IsNanoseconds ? raw / 1_000_000.0 : (double)raw;
             }

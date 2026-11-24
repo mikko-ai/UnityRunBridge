@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using Mk.UnityAgentBridge.Editor.Capture;
 using Mk.UnityAgentBridge.Editor.Contracts;
 using Mk.UnityAgentBridge.Editor.Hierarchy;
 using Mk.UnityAgentBridge.Editor.Json;
@@ -49,6 +50,9 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             }
 
             services = BridgeServices.Current(services);
+            var surface = CaptureController.FindGameSurface();
+            var referenceWidth = surface != null ? surface.width : 0;
+            var referenceHeight = surface != null ? surface.height : 0;
             PointerSimulator.ClickResult result = PointerSimulator.SimulateClick(
                 resolved.Node.gameObject, force, services);
             if (!result.Ok)
@@ -81,7 +85,84 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
             }
 
             response["events"] = eventsArray;
+            if (result.ScreenPoint is Vector2 point && referenceWidth > 0 && referenceHeight > 0)
+            {
+                JsonValue position = JsonValue.NewObject();
+                position["x"] = point.x;
+                position["y"] = point.y;
+                position["width"] = referenceWidth;
+                position["height"] = referenceHeight;
+                response["screenPoint"] = position;
+            }
+            return response;
             return AuditAndReturn("click", request, scene, response, stopwatch);
+        }
+
+        internal static object ClickAt(BridgeRequestContext ctx, IBridgeServiceResolver services = null)
+        {
+            JsonValue body = ctx.Body;
+            if (body == null || !body.TryGetDouble("x", out double x) || !body.TryGetDouble("y", out double y) ||
+                !TryReadImageDimension(body, "imageWidth", out int imageWidth) ||
+                !TryReadImageDimension(body, "imageHeight", out int imageHeight) ||
+                !TryReadImageDimension(body, "referenceWidth", out int referenceWidth) ||
+                !TryReadImageDimension(body, "referenceHeight", out int referenceHeight) ||
+                !(x >= 0 && x < imageWidth && y >= 0 && y < imageHeight))
+            {
+                return BridgeResponse.Failure("invalid_argument", "尺寸必须为正整数，坐标必须位于截图内");
+            }
+
+            if (!TryValidatePlayMode(out BridgeResponse gate))
+            {
+                return gate;
+            }
+
+            RenderTexture surface = CaptureController.FindGameSurface();
+            if (surface == null)
+            {
+                return BridgeResponse.Failure("capture_unavailable", "Game View 没有可读的渲染画面");
+            }
+
+            if (surface.width != referenceWidth || surface.height != referenceHeight)
+            {
+                return BridgeResponse.Failure("game_view_resized", "Game View 尺寸已变化，请重新截取画面");
+            }
+
+            services = BridgeServices.Current(services);
+            if (services == null || !services.TryGet(out ICoordinateClickBackend backend))
+            {
+                return BridgeResponse.Failure("bridge_capability_missing", "缺少坐标点击后端");
+            }
+
+            Vector2 point = ScreenshotAnnotationRenderer.ImageToUnityScreen(
+                (float)x, (float)y, imageWidth, imageHeight, referenceWidth, referenceHeight);
+            InteractionOperationResult result = backend.ClickAt(point);
+            if (!result.Ok)
+            {
+                return BridgeResponse.Failure(result.ErrorCode, result.ErrorMessage);
+            }
+
+            JsonValue response = JsonValue.NewObject();
+            response["ok"] = true;
+            response["clicked"] = result.Clicked == null
+                ? JsonValue.Null
+                : JsonValue.FromString(NodePath.BuildPath(result.Clicked.transform));
+            response["raycastHit"] = result.RaycastHit == null
+                ? JsonValue.Null
+                : JsonValue.FromString(NodePath.BuildPath(result.RaycastHit.transform));
+            return response;
+        }
+
+        private static bool TryReadImageDimension(JsonValue body, string key, out int dimension)
+        {
+            dimension = 0;
+            if (!body.TryGetDouble(key, out double value) ||
+                !(value >= 1 && value <= int.MaxValue) || Math.Truncate(value) != value)
+            {
+                return false;
+            }
+
+            dimension = (int)value;
+            return true;
         }
 
         internal static object Input(BridgeRequestContext ctx, IBridgeServiceResolver services = null)

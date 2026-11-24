@@ -116,6 +116,27 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
             Assert.AreEqual("invalid_argument", ((BridgeResponse)result).code);
         }
 
+        [TestCase(20, 640, "not_in_play_mode")]
+        [TestCase(640, 640, "invalid_argument")]
+        [TestCase(-1, 640, "invalid_argument")]
+        [TestCase(20, 0, "invalid_argument")]
+        [TestCase(20, 640.5, "invalid_argument")]
+        public void ClickAt_ValidatesImageInputAndPlayMode(double x, double width, string code)
+        {
+            JsonValue body = JsonValue.NewObject();
+            body["x"] = x;
+            body["y"] = 30;
+            body["imageWidth"] = width;
+            body["imageHeight"] = 360;
+            body["referenceWidth"] = 1280;
+            body["referenceHeight"] = 720;
+
+            object result = InteractionController.ClickAt(BridgeRequestContext.ForTests(rawBody: body.ToString()));
+
+            Assert.IsInstanceOf<BridgeResponse>(result);
+            Assert.AreEqual(code, ((BridgeResponse)result).code);
+        }
+
         [Test]
         public void Input_NotInPlayMode_ReturnsNotInPlayMode()
         {
