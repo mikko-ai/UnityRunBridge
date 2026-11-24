@@ -1,0 +1,51 @@
+name: CI
+
+# The default branch registers manual dispatch. Selecting a ref runs that
+# ref's ci.yml, so the Game View suite stays with its development code.
+on:
+  workflow_dispatch:
+    inputs:
+      matrix_set:
+        description: 'Unity matrix set (pr|full)'
+        type: choice
+        options:
+          - pr
+          - full
+        default: pr
+      visual_smoke:
+        description: 'Game View smoke (select a ref containing the smoke suite)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Check dispatch options
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reject unavailable Game View suite on this ref
+        if: inputs.visual_smoke
+        run: |
+          echo "::error::This ref does not include the Game View smoke suite. Select the development ref containing scripts/run-unity-smoke.py."
+          exit 1
+
+  baseline:
+    name: Unity 2022.3 baseline
+    needs: validate
+    runs-on: [self-hosted, macOS, unity-2022.3.62f2]
+    timeout-minutes: 180
+    env:
+      UNITY_BIN: /Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity
+      UNITY_MATRIX_SET: ${{ inputs.matrix_set }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run Python tests
+        run: bash scripts/run-python-tests.sh
+      - name: Run Unity matrix
+        run: bash scripts/run-unity-matrix.sh --set "$UNITY_MATRIX_SET"
