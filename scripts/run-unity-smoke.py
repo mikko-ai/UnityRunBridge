@@ -53,8 +53,9 @@ def cli(project, *args, expected="ok", timeout=30, save=None):
     return data
 
 
-def run_utf(base, unity):
-    project = project_at(base, "utf", {"com.unity.test-framework": "1.1.33"})
+def run_utf(base, unity, project=None):
+    if project is None:
+        project = project_at(base, "utf", {"com.unity.test-framework": "1.1.33"})
     for mode in ("Edit", "Play"):
         folder = project / "Assets" / mode
         folder.mkdir()
@@ -125,10 +126,11 @@ def click(project, frame, x, y, *, expected="ok", adjust_width=0):
                "--reference-height", reference["height"], expected=expected)
 
 
-def run_visual(base, unity, width, height, *, watch=False, model=False):
+def run_visual(base, unity, width, height, *, watch=False, model=False, records=False):
     dimensions = f"{width}x{height}"
     project = project_at(base, dimensions, {
         "com.mk.unity-agent-bridge": f"file:{BRIDGE}", "com.unity.ugui": "1.0.0",
+        **({"com.unity.test-framework": "1.1.33"} if records else {}),
     })
     (project / "Assets/Editor").mkdir()
     (project / "Assets/Scenes").mkdir()
@@ -149,6 +151,10 @@ def run_visual(base, unity, width, height, *, watch=False, model=False):
         if model:
             verify_live_model(project)
             return
+        if records:
+            verify_watch(project)
+            verify_offline_record(project)
+            return project
         cli(project, "play", "--session", "coordinate-smoke")
         before = capture(project, width, height, "before")
         x, y = before["width"] / 2, before["height"] / 2
@@ -261,14 +267,47 @@ def verify_live_model(project):
         cli(project, "stop", "--latest", save="model-stop.json")
     if result.returncode != 0:
         raise RuntimeError("Midscene 验收失败；请在本机查看 model-acceptance.log")
-    if not list((project / "midscene_run" / "report").glob("*.html")):
-        raise RuntimeError("Midscene 未生成 HTML 报告")
+    [item] = cli(project, "runs", "list", "--kind", "midscene")["runs"]
+    record = cli(project, "runs", "show", item["key"])["record"]
+    assert record["status"] == "passed" and any(item["kind"] == "html" for item in record["artifacts"]), record
     print("Midscene model: tap, positive assertion and expected negative verified", flush=True)
+
+
+def verify_offline_record(project):
+    cli(project, "play", "--session", "midscene-offline-record")
+    node_script = ROOT / "examples/midscene-game-view/offline-record-fixture.mjs"
+    try:
+        subprocess.run(
+            ["node", str(node_script), str(project), str(Path(sys.executable).with_name("unityctl"))],
+            cwd=project, timeout=30, check=True,
+        )
+    finally:
+        cli(project, "stop", "--latest", save="offline-stop.json")
+
+
+def verify_run_index(work, unity):
+    project = run_visual(work / "records", unity, 1280, 720, records=True)
+    run_utf(work, unity, project=project)
+    listing = cli(project, "runs", "list", "--limit", 20, save="unified-list.json")
+    assert {item["kind"] for item in listing["runs"]} == {"scenario", "utf", "midscene"}, listing
+    expected = {
+        "scenario": {"report", "log", "screenshot"},
+        "utf": {"report", "log", "nunit"},
+        "midscene": {"html", "log", "screenshot"},
+    }
+    for kind, artifacts in expected.items():
+        item = next(row for row in listing["runs"] if row["kind"] == kind and row["status"] == "failed")
+        record = cli(project, "runs", "show", item["key"], save=f"unified-{kind}.json")["record"]
+        assert record["status"] == "failed" and record["failures"], record
+        assert artifacts <= {entry["kind"] for entry in record["artifacts"]}, record
+        if kind != "utf":
+            assert Path(record["failures"][0]["screenshot"]).is_file(), record
+    print("Combined run index: Scenario, UTF and Midscene failures with local evidence", flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "model", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "model", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
@@ -292,6 +331,8 @@ def main():
             run_visual(work, unity.resolve(), width, height)
     if args.suite in {"watch", "all"}:
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
+    if args.suite == "records":
+        verify_run_index(work, unity.resolve())
     if args.suite == "model":
         run_visual(work / "model", unity.resolve(), 1280, 720, model=True)
 

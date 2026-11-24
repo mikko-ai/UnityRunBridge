@@ -16,6 +16,8 @@ npm run smoke -- "$UNITY_PROJECT" "画面中央的蓝色按钮" "中央出现弹
 unityctl --project "$UNITY_PROJECT" stop
 ```
 
+运行完成会输出 `midscene:<id>`；用 `unityctl --project "$UNITY_PROJECT" runs show midscene:<id>` 查看截图、失败步骤和 HTML 路径。产物在该项目的 `.unity-agent/visual-runs/` 下，仅本机保存。
+
 实际游戏应替换视觉提示和断言。`smoke` 不启停 Editor 或 Play Mode、不重试点击、不改变配置。失败后若 Play Mode 是你开启的，请按需退出。
 
 ## 适用边界

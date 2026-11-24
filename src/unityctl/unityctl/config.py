@@ -13,6 +13,7 @@ SESSIONS_DIRNAME = "sessions"
 SCRATCH_DIRNAME = "scratch"
 BUILDS_DIRNAME = "builds"
 TEST_RUNS_DIRNAME = "test-runs"
+VISUAL_RUNS_DIRNAME = "visual-runs"
 
 BRIDGE_HOST = "127.0.0.1"
 DEFAULT_PREFERRED_PORT = 17890
@@ -212,6 +213,7 @@ def init_project_config(
     )
 
     updated_test_runs_ignore = append_gitignore_entry(gitignore_path, f"{TEST_RUNS_DIRNAME}/")
+    updated_visual_runs_ignore = append_gitignore_entry(gitignore_path, f"{VISUAL_RUNS_DIRNAME}/")
 
     effective = resolve_effective_config(project_path=project)
 
@@ -230,6 +232,7 @@ def init_project_config(
             or updated_scratch_ignore
             or updated_builds_ignore
             or updated_test_runs_ignore
+            or updated_visual_runs_ignore
         ),
     )
 

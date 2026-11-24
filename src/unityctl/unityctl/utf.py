@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 from xml.etree import ElementTree
@@ -113,6 +114,7 @@ def run_tests(
     report = {
         "ok": True, "code": "ok", "schemaVersion": 1, "jobId": job_id, "status": "running",
         "mode": mode, "filter": test_filter, "runnerPid": os.getpid(),
+        "startedAt": datetime.now(timezone.utc).isoformat(),
         "reportPath": str(report_path), "resultsPath": str(xml_path), "logPath": str(log_path),
     }
     _write_report(report_path, report)

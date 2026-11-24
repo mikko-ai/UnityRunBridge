@@ -18,7 +18,7 @@ uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.p
 
 `visual` 需要可交互的桌面会话：会启动临时 Editor，并切换到 Game View。不要在无图形或只允许后台服务的 Runner 上把它标成通过。每次结果保留在 `.tmp/unity-smoke/run-*/`，可用 `--output` 指定父目录。临时目录及其 Unity Library 由调用方按需清理。
 
-CI 默认运行 UTF 三例与无模型 Midscene 适配器测试；有可用桌面的自托管 Runner 时，从 CI 的手动触发入口启用 `visual_smoke`（图形回归及实时监看验收）。日志、XML、报告和截图在任务结束后可下载；**未选择图形回归不表示图形通过**。Midscene 的真实模型验收不属于这组无模型测试。
+CI 默认运行 UTF 三例与无模型 Midscene 适配器测试；有可用桌面的自托管 Runner 时，从 CI 的手动触发入口启用 `visual_smoke`（图形回归、实时监看和统一运行记录验收）。日志、XML、报告和截图在任务结束后可下载；**未选择图形回归不表示图形通过**。Midscene 的真实模型验收不属于这组无模型测试。
 
 ## 单独验收 Midscene 真实模型
 
@@ -29,4 +29,6 @@ uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.p
   --unity /path/to/Unity.app --allow-model-requests
 ```
 
-该命令只启动临时 UGUI 演示。验收会确认模型点击了真实按钮、正确认出弹窗，并拒绝一条与画面相反的断言。模型网络/执行出错不能算负例通过。结束后在输出目录中查看 `model-acceptance.log` 与 `midscene_run/report/`；不要把报告未经审查上传。
+该命令只启动临时 UGUI 演示。验收会确认模型点击了真实按钮、正确认出弹窗，并拒绝一条与画面相反的断言。模型网络/执行出错不能算负例通过。结束后在输出目录中查看 `model-acceptance.log`，或在临时项目里用 `unityctl runs list --kind midscene` 和 `runs show` 找到报告；不要把报告未经审查上传。
+
+三种运行记录汇总的回归见 [统一运行记录](unityctl-runs.md)。

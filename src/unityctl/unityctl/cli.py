@@ -68,6 +68,7 @@ from unityctl.skills import (
     resolve_skills_dir,
 )
 from unityctl.run_events import RunEvents
+from unityctl.run_records import RunRecordError, list_runs, show_run
 from unityctl.watch import create_watch_server
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
 
@@ -1009,6 +1010,15 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--session-id", help="固定会话 ID；不指定则跟随最新可监看的 Scenario")
     watch.add_argument("--port", type=int, default=0, help="本机端口；默认随机分配")
 
+    runs = subparsers.add_parser("runs", help="统一查询 Scenario、UTF 和 Midscene 运行记录")
+    _add_project_option(runs)
+    run_records = runs.add_subparsers(dest="runs_command", required=True)
+    runs_list = run_records.add_parser("list", help="按时间列出本机运行")
+    runs_list.add_argument("--kind", choices=("scenario", "utf", "midscene"))
+    runs_list.add_argument("--limit", type=int, default=20, help="最多显示 1–200 条")
+    runs_show = run_records.add_parser("show", help="查看失败步骤、截图及日志文件")
+    runs_show.add_argument("key", metavar="KIND:ID")
+
     scenario_validate = scenario_subparsers.add_parser(
         "validate",
         help="只做字段/结构校验，不连接 Bridge、不创建 session",
@@ -1124,6 +1134,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "build": cmd_build,
         "test": cmd_test,
         "watch": cmd_watch,
+        "runs": cmd_runs,
         "build-size": cmd_build_size,
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
@@ -2204,6 +2215,19 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
 
     overall_ok = all(check["ok"] for check in checks)
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
+
+
+def cmd_runs(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.project_path or Path.cwd())
+    if args.runs_command == "list":
+        if not 1 <= args.limit <= 200:
+            raise CliError("invalid_argument", "--limit 必须在 1 至 200 之间")
+        return {"ok": True, **list_runs(project, args.kind, args.limit)}
+    try:
+        # This command reads evidence; its own success is independent of the recorded result.
+        return {"ok": True, "record": show_run(project, args.key)}
+    except RunRecordError as exc:
+        raise CliError("run_record_unavailable", str(exc)) from exc
 
 
 def cmd_watch(args: argparse.Namespace) -> dict[str, Any]:

@@ -130,11 +130,24 @@ jobs:
           uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
           visual --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
-      - name: Run live observer smoke
+      - name: Set up Node for optional GUI evidence
+        if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/midscene-game-view/package-lock.json
+
+      - name: Install adapter dependencies
+        if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
+        working-directory: examples/midscene-game-view
+        run: npm ci --ignore-scripts
+
+      - name: Run live observer and unified records smoke (no model)
         if: github.event_name == 'workflow_dispatch' && inputs.visual_smoke
         run: >-
           uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py
-          watch --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
+          records --output ".tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Upload smoke evidence
         if: always()
@@ -151,6 +164,8 @@ jobs:
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/opened.json
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/closed.json
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/watch-*-evidence.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/unified-*.json
+            .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/unity-offline-run-index.html
             .tmp/unity-smoke/${{ github.run_id }}-${{ github.run_attempt }}/**/*.png
           include-hidden-files: true
           if-no-files-found: warn

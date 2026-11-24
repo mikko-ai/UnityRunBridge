@@ -41,10 +41,12 @@ export class UnityGameView extends AbstractInterface {
   #run;
   #frame;
   #pending;
+  #onFrame;
 
-  constructor(run) {
+  constructor(run, { onFrame } = {}) {
     super();
     this.#run = run;
+    this.#onFrame = onFrame;
   }
 
   async #capture() {
@@ -69,6 +71,7 @@ export class UnityGameView extends AbstractInterface {
     }
 
     const png = await readFile(path);
+    if (this.#onFrame) await this.#onFrame(png);
     return { width, height, referenceScreen, base64: `data:image/png;base64,${png.toString("base64")}` };
   }
 
