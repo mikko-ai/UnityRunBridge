@@ -1,0 +1,93 @@
+{
+  "name": "modal-focus-portrait",
+  "description": "验证弹窗默认焦点与关闭后焦点恢复，保留 720x1280 布局截图",
+  "defaults": {
+    "waitTimeoutSeconds": 30
+  },
+  "steps": [
+    {
+      "action": "open-scene",
+      "scene": "Assets/Scenes/UiReview.unity"
+    },
+    {
+      "action": "play"
+    },
+    {
+      "action": "wait-for",
+      "id": "ready",
+      "gameplay": {
+        "command": "UnityRunBridge.Examples.UiReviewDemo.FocusedControl",
+        "equals": "launcher"
+      }
+    },
+    {
+      "action": "wait-for",
+      "id": "viewport",
+      "gameplay": {
+        "command": "UnityRunBridge.Examples.UiReviewDemo.ViewportSize",
+        "equals": "720x1280"
+      }
+    },
+    {
+      "action": "click",
+      "id": "open-dialog",
+      "path": "ReviewCanvas/Open"
+    },
+    {
+      "action": "wait-for",
+      "id": "dialog-visible",
+      "ui": {
+        "path": "ReviewCanvas/Dialog",
+        "activeInHierarchy": true
+      }
+    },
+    {
+      "action": "assert",
+      "id": "default-focus",
+      "gameplay": {
+        "command": "UnityRunBridge.Examples.UiReviewDemo.FocusedControl",
+        "equals": "confirm"
+      }
+    },
+    {
+      "action": "screenshot",
+      "id": "dialog-open",
+      "expectedSize": {
+        "width": 720,
+        "height": 1280
+      }
+    },
+    {
+      "action": "click",
+      "id": "close-dialog",
+      "path": "ReviewCanvas/Dialog/Card/Cancel"
+    },
+    {
+      "action": "wait-for",
+      "id": "dialog-hidden",
+      "ui": {
+        "path": "ReviewCanvas/Dialog",
+        "activeInHierarchy": false
+      }
+    },
+    {
+      "action": "assert",
+      "id": "restored-focus",
+      "gameplay": {
+        "command": "UnityRunBridge.Examples.UiReviewDemo.FocusedControl",
+        "equals": "launcher"
+      }
+    },
+    {
+      "action": "screenshot",
+      "id": "dialog-closed",
+      "expectedSize": {
+        "width": 720,
+        "height": 1280
+      }
+    },
+    {
+      "action": "stop"
+    }
+  ]
+}

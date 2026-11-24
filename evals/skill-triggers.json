@@ -1,0 +1,212 @@
+[
+  {
+    "id": "zh01",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "刚改了 Unity 的登录流程，帮我重编译，进 Play Mode 看 Console 有没有异常。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "zh02",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "这个 Player 包最近变大，比较这两次构建归档的资源分类，检查交付 ZIP 有没有超过预算。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "zh03",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "$unityctl-project-skill-creator 请为这个 Unity 项目新建一份项目专属 Skill，写明怎样定位 UI 弹窗。",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "zh04",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "$unityctl-project-skill-creator 更新项目的 UI 定位 Skill，把新场景的命名和根节点规律写进去。",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "zh05",
+    "locale": "zh",
+    "kind": "near-miss",
+    "prompt": "$unityctl-project-skill-creator 只输出一份项目 UI 定位 Skill，不运行场景、不做 Unity 验证。",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ],
+    "reject": "unityctl"
+  },
+  {
+    "id": "zh06",
+    "locale": "zh",
+    "kind": "near-miss",
+    "prompt": "已有项目 UI Skill 不用改；按它定位弹窗并运行已有 Scenario 做焦点回归。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ],
+    "reject": "unityctl-project-skill-creator"
+  },
+  {
+    "id": "zh07",
+    "locale": "zh",
+    "kind": "combo",
+    "prompt": "$unityctl-project-skill-creator 用实际 Unity Hierarchy 和两张截图验证弹窗定位，再把验证过的定位规律写入项目 Skill。",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl",
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "zh08",
+    "locale": "zh",
+    "kind": "none",
+    "prompt": "帮我把这段 Unity C# 的字段名改清楚，只出代码，不开 Editor 或写 Skill。",
+    "explicitSkills": [],
+    "expected": []
+  },
+  {
+    "id": "zh09",
+    "locale": "zh",
+    "kind": "none",
+    "prompt": "把项目 .agents/skills 目录列出来。不安装、不生成或更新 Skill，也不连接 Unity。",
+    "explicitSkills": [],
+    "expected": []
+  },
+  {
+    "id": "zh10",
+    "locale": "zh",
+    "kind": "none",
+    "explicitSkills": [],
+    "expected": [],
+    "prompt": "只写一份项目专属的 UI 定位 Skill，不运行 Unity。"
+  },
+  {
+    "id": "en01",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "The Unity editor is closed; start it, run the existing UI scenario and summarize any blocking errors.",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "en02",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "Unity won't start on this CI machine. Run an offline meta and GUID health check and inspect the saved build log.",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "en03",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "$unityctl-project-skill-creator Create a project-specific Unity skill documenting how to locate popup UI in this repository.",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "en04",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "$unityctl-project-skill-creator Update the project's UI locator skill with its new navigation conventions, without exercising the game.",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "en05",
+    "locale": "en",
+    "kind": "near-miss",
+    "prompt": "$unityctl-project-skill-creator Write down our known Unity UI lookup conventions as a project skill. No Editor activity.",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl-project-skill-creator"
+    ],
+    "reject": "unityctl"
+  },
+  {
+    "id": "en06",
+    "locale": "en",
+    "kind": "near-miss",
+    "prompt": "Use the existing project skill to open the HUD scene and record a gameplay session; do not write a new skill.",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ],
+    "reject": "unityctl-project-skill-creator"
+  },
+  {
+    "id": "en07",
+    "locale": "en",
+    "kind": "combo",
+    "prompt": "$unityctl-project-skill-creator Inspect the running Unity UI hierarchy, validate the modal in a scenario, then record the verified local locator rules in a project skill.",
+    "explicitSkills": [
+      "unityctl-project-skill-creator"
+    ],
+    "expected": [
+      "unityctl",
+      "unityctl-project-skill-creator"
+    ]
+  },
+  {
+    "id": "en08",
+    "locale": "en",
+    "kind": "none",
+    "prompt": "Implement a Unity health bar animation, but only draft the C# patch; don't drive Unity or add an agent skill.",
+    "explicitSkills": [],
+    "expected": []
+  },
+  {
+    "id": "en09",
+    "locale": "en",
+    "kind": "none",
+    "prompt": "Translate this game release note from English to Chinese.",
+    "explicitSkills": [],
+    "expected": []
+  },
+  {
+    "id": "en10",
+    "locale": "en",
+    "kind": "none",
+    "explicitSkills": [],
+    "expected": [],
+    "prompt": "Document our UI convention in a new project skill; do not run the editor."
+  }
+]

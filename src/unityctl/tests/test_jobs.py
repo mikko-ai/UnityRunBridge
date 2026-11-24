@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from unityctl.discovery import BridgeInfo
-from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
+from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, poll_job_with_client, wait_for_job
 
 
 def make_unity_project(path: Path) -> Path:
@@ -163,3 +163,50 @@ def test_wait_for_job_raises_editor_exited_when_pid_dead_after_connection_failur
 
     with pytest.raises(JobEditorExited):
         wait_for_job(project, "job-1", timeout_seconds=1, poll_interval=0.05, initial_info=info)
+
+
+def test_poll_job_with_client_reuses_injected_client_and_clock():
+    class FakeClient:
+        def __init__(self):
+            self.responses = [
+                {"job": {"id": "job-1", "status": "running"}},
+                {"job": {"id": "job-1", "status": "succeeded", "result": {"ok": True}}},
+            ]
+            self.calls = []
+
+        def get_job(self, job_id):
+            self.calls.append(job_id)
+            return self.responses.pop(0)
+
+    now = [0.0]
+    client = FakeClient()
+    job = poll_job_with_client(
+        client,
+        "job-1",
+        timeout_seconds=2,
+        poll_interval=0.1,
+        now_fn=lambda: now[0],
+        sleep_fn=lambda seconds: now.__setitem__(0, now[0] + seconds),
+    )
+
+    assert job["status"] == "succeeded"
+    assert client.calls == ["job-1", "job-1"]
+
+
+def test_poll_job_with_client_timeout_keeps_last_job():
+    class FakeClient:
+        def get_job(self, job_id):
+            return {"job": {"id": job_id, "status": "running"}}
+
+    now = [0.0]
+    with pytest.raises(JobTimeout) as exc:
+        poll_job_with_client(
+            FakeClient(),
+            "job-1",
+            timeout_seconds=0.15,
+            poll_interval=0.1,
+            now_fn=lambda: now[0],
+            sleep_fn=lambda seconds: now.__setitem__(0, now[0] + seconds),
+        )
+
+    assert exc.value.last_job == {"id": "job-1", "status": "running"}

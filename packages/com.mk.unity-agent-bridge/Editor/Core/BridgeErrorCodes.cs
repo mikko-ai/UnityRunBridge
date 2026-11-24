@@ -47,6 +47,8 @@ namespace Mk.UnityAgentBridge.Editor
             ["node_inactive"] = 409,
             ["occluded"] = 409,
             ["no_click_handler"] = 422,
+            ["click_not_dispatched"] = 409,
+            ["game_view_resized"] = 409,
             ["not_interactable"] = 409,
             ["not_input_field"] = 422,
             ["unsupported_set_value"] = 422,
@@ -56,6 +58,9 @@ namespace Mk.UnityAgentBridge.Editor
             ["unsupported_signature"] = 422,
             ["already_recording"] = 409,
             ["no_input_backend"] = 422,
+            ["interaction_busy"] = 409,
+            ["bridge_capability_missing"] = 422,
+            ["cancelled"] = 409,
 
             // Phase 4：profiling / build / health
             ["already_profiling"] = 409,

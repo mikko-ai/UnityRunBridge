@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from unityctl.client import BridgeClient, BridgeUnreachableError
 from unityctl.discovery import BridgeInfo, DiscoveryError, discover
@@ -24,6 +24,35 @@ class JobFailed(RuntimeError):
     def __init__(self, job: dict[str, Any]):
         super().__init__(job.get("errorMessage") or job.get("errorCode") or "job failed")
         self.job = job
+
+
+def poll_job_with_client(
+    client: BridgeClient,
+    job_id: str,
+    timeout_seconds: float,
+    poll_interval: float = 0.5,
+    raise_on_failure: bool = True,
+    now_fn: Callable[[], float] = time.monotonic,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """使用既有 client 轮询 job；不做 discover，适合 Scenario 的依赖注入边界。"""
+    deadline = now_fn() + timeout_seconds
+    last_job: dict[str, Any] | None = None
+
+    while True:
+        response = client.get_job(job_id)
+        job = response.get("job", {})
+        last_job = job
+        status = job.get("status")
+        if status == "succeeded":
+            return job
+        if status == "failed":
+            if raise_on_failure:
+                raise JobFailed(job)
+            return job
+        if now_fn() >= deadline:
+            raise JobTimeout(f"等待 job {job_id} 完成超时", last_job=last_job)
+        sleep_fn(poll_interval)
 
 
 def wait_for_job(

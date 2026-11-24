@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mk.example/schemas/unity-agent-bridge/ui-annotations.schema.json",
+  "title": "Unity Agent Bridge UI Annotations Sidecar",
+  "description": "Game View 截图标注 sidecar：坐标使用 PNG 左上原点，并按输出纹理尺寸缩放，可直接传给 capture/hit-test。",
+  "type": "object",
+  "required": ["schemaVersion", "coordinateSpace", "referenceScreen", "output", "scale", "scaleX", "scaleY", "elements"],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "coordinateSpace": {
+      "type": "string",
+      "const": "image-top-left"
+    },
+    "referenceScreen": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "number" },
+        "height": { "type": "number" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    },
+    "scale": {
+      "type": "number"
+    },
+    "scaleX": {
+      "type": "number",
+      "description": "referenceScreen X 坐标到输出图像 X 坐标的精确缩放比例。"
+    },
+    "scaleY": {
+      "type": "number",
+      "description": "referenceScreen Y 坐标到输出图像 Y 坐标的精确缩放比例。"
+    },
+    "elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "path", "type", "interaction", "bounds", "screenX", "screenY"],
+        "properties": {
+          "label": { "type": "string" },
+          "name": { "type": "string" },
+          "path": { "type": "string" },
+          "type": { "type": "string" },
+          "interaction": { "type": "string" },
+          "interactable": { "type": "boolean" },
+          "sortingOrder": { "type": "integer" },
+          "screenX": { "type": "number" },
+          "screenY": { "type": "number" },
+          "bounds": {
+            "type": "object",
+            "required": ["minX", "minY", "maxX", "maxY"],
+            "properties": {
+              "minX": { "type": "number" },
+              "minY": { "type": "number" },
+              "maxX": { "type": "number" },
+              "maxY": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

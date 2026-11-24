@@ -2,12 +2,16 @@ import argparse
 import json
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from unityctl import __version__
+from unityctl import __version__, agent_run
+from unityctl.utf import UtfError, read_test_job, run_tests
 from unityctl.build import BuildError, run_build
-from unityctl.client import BridgeClient, BridgeClientError
+from unityctl.build_size import analyze_build_size
+from unityctl.build_size_scan import SUPPORTED_PLATFORMS, scan_build_assets
+from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
 from unityctl.config import (
     ConfigError,
     UNITY_AGENT_BRIDGE_PACKAGE_ID,
@@ -42,6 +46,7 @@ from unityctl.editor import start_editor
 from unityctl.health import HealthError, run_health
 from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
 from unityctl.scenario import (
+    DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS,
     ScenarioContext,
     ScenarioValidationError,
     convert_recording_to_scenario,
@@ -62,6 +67,9 @@ from unityctl.skills import (
     install_all_skills,
     resolve_skills_dir,
 )
+from unityctl.run_events import RunEvents
+from unityctl.run_records import RunRecordError, list_runs, show_run
+from unityctl.watch import create_watch_server
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
 
 
@@ -184,7 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--force",
         action="store_true",
-        help="重新生成缺失的配置文件（不覆盖已有 config.json / config.local.json）",
+        help="用初始值覆盖已有 config.json / config.local.json；常规补文件请不要使用",
     )
     package_group = init.add_mutually_exclusive_group()
     package_group.add_argument(
@@ -508,9 +516,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="等待构建进程结束的超时时间（秒），默认读取 config.json 的 timeouts.buildSeconds（3600）",
     )
 
+    build.add_argument("--clean", action="store_true", help="使用 Unity CleanBuildCache 完整重构建 Player 数据")
+
+    build_size = subparsers.add_parser(
+        "build-size",
+        help="只读分析构建归档、交付体积及资源导入风险",
+        description="不启动 Unity。构建日志、实际交付文件以及静态扫描使用不同口径。",
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(build_size)
+    report_input = build_size.add_mutually_exclusive_group()
+    report_input.add_argument("--build-dir", type=Path, help="含 build.log 和 build-report.json 的构建归档")
+    report_input.add_argument("--log", type=Path, help="独立 Editor 或 batchmode 构建日志")
+    build_size.add_argument("--artifact", type=Path, help="要计量的交付文件或目录")
+    build_size.add_argument("--report-budget-mib", help="日志未压缩总量预算（MiB）")
+    build_size.add_argument("--artifact-budget-mib", help="实际交付文件或目录字节总量预算（MiB）")
+    build_size.add_argument("--scan-platform", choices=SUPPORTED_PLATFORMS, help="指定平台并扫描目标项目 Assets")
+    build_size.add_argument("--max-texture-size", type=int, default=2048, help="静态扫描纹理边长提示阈值（像素）")
+    build_size.add_argument("--top", type=int, default=15, help="输出日志中最大的 N 个资源（1–1000）")
+
     health = subparsers.add_parser(
         "health",
-        help="项目健康检查（编译/缺失脚本/构建场景列表/包一致性）",
+        help="项目健康检查（编译/缺失脚本/构建场景列表/包一致性/离线资源检查）",
         description=(
             "doctor 回答『环境能不能跑』，health 回答『项目干不干净』：默认跑全部检查项，"
             "可用 --check 只跑指定项。需要 Bridge 的检查项在 Bridge 不可达时标记为 skipped 并说明原因，"
@@ -522,7 +549,7 @@ def build_parser() -> argparse.ArgumentParser:
     health.add_argument(
         "--check",
         metavar="NAME[,NAME...]",
-        help="只运行指定检查项（逗号分隔），可选：compilation,missing_scripts,build_scenes,packages；"
+        help="只运行指定检查项（逗号分隔），可选：compilation,missing_scripts,build_scenes,packages,assets；"
         "缺省运行全部",
     )
     health.add_argument(
@@ -642,6 +669,48 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="等待截图 job 完成的超时秒数",
     )
+    snapshot.add_argument(
+        "--annotate",
+        action="store_true",
+        help="额外生成标注 PNG 与 annotations.json sidecar（不修改场景 Hierarchy）",
+    )
+
+    hit_test = subparsers.add_parser(
+        "hit-test",
+        help="对截图像素坐标做 UGUI + Physics3D 命中探测（需 Play Mode）",
+        description=(
+            "把 PNG/图像左上原点坐标转换为 Game View 屏幕坐标，分别返回 ugui.hits 与 physics3d.hits。"
+            "不依赖 interaction capability，NoUGUI 下仍可探测 3D Physics。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(hit_test)
+    hit_test.add_argument("--x", type=float, required=True, help="图像 X（左上原点）")
+    hit_test.add_argument("--y", type=float, required=True, help="图像 Y（左上原点）")
+    hit_test.add_argument(
+        "--image-width",
+        type=float,
+        required=True,
+        dest="image_width",
+        help="截图/图像宽度",
+    )
+    hit_test.add_argument(
+        "--image-height",
+        type=float,
+        required=True,
+        dest="image_height",
+        help="截图/图像高度",
+    )
+
+    click_at = subparsers.add_parser(
+        "click-at",
+        help="按 Game View 截图像素点击 UGUI（需 Play Mode）",
+    )
+    _add_project_option(click_at)
+    for coordinate in ("x", "y"):
+        click_at.add_argument(f"--{coordinate}", type=float, required=True, help="图像坐标（左上原点）")
+    for dimension in ("image-width", "image-height", "reference-width", "reference-height"):
+        click_at.add_argument(f"--{dimension}", type=int, required=True)
 
     click_cmd = subparsers.add_parser(
         "click",
@@ -703,6 +772,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="显式指定组件（节点上有多个可设值组件时必填），如 Slider/Toggle/Scrollbar/Dropdown/ScrollRect",
     )
     set_value_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+
+    long_press_cmd = subparsers.add_parser(
+        "long-press",
+        help="长按 UGUI 节点（异步 job，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/long-press 启动跨帧长按：pointerEnter→Down→保持→Up→Exit，"
+            "默认不发送 pointerClick。HTTP 立即返回 jobId，本命令自动轮询至终态。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(long_press_cmd)
+    long_press_cmd.add_argument("path", help="节点 path 或 instanceId")
+    long_press_cmd.add_argument(
+        "--duration",
+        type=float,
+        default=0.5,
+        dest="duration_seconds",
+        metavar="SECONDS",
+        help="长按持续时间（秒，默认 0.5）",
+    )
+    long_press_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="跳过射线遮挡检测，直接对目标节点派发",
+    )
+    long_press_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    long_press_cmd.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待手势 job 完成的超时秒数（默认至少覆盖手势时长与服务端清理窗口）",
+    )
+
+    drag_cmd = subparsers.add_parser(
+        "drag",
+        help="拖拽 UGUI 节点（异步 job，需 Play Mode）",
+        description=(
+            "通过 Bridge 的 /interaction/drag 启动跨帧拖拽："
+            "Enter→Down→initializePotentialDrag→beginDrag→drag*→endDrag→Up→Exit。"
+            "delta 使用 Unity 屏幕像素（右/上为正）。HTTP 立即返回 jobId，本命令自动轮询。"
+        ),
+        formatter_class=_HelpFormatter,
+    )
+    _add_project_option(drag_cmd)
+    drag_cmd.add_argument("path", help="节点 path 或 instanceId")
+    drag_cmd.add_argument("--delta-x", type=float, required=True, dest="delta_x", help="水平位移（右为正）")
+    drag_cmd.add_argument("--delta-y", type=float, required=True, dest="delta_y", help="垂直位移（上为正）")
+    drag_cmd.add_argument(
+        "--duration",
+        type=float,
+        default=0.3,
+        dest="duration_seconds",
+        metavar="SECONDS",
+        help="拖拽持续时间（秒，默认 0.3）",
+    )
+    drag_cmd.add_argument(
+        "--steps",
+        type=int,
+        default=8,
+        help="拖拽插值步数（默认 8）",
+    )
+    drag_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="跳过射线遮挡检测，直接对目标节点派发",
+    )
+    drag_cmd.add_argument("--scene", help="多场景同名 path 命中歧义时用于消歧")
+    drag_cmd.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="等待手势 job 完成的超时秒数（默认至少覆盖手势时长与服务端清理窗口）",
+    )
 
     gameplay = subparsers.add_parser(
         "gameplay",
@@ -859,6 +1003,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="全局缩放 wait-for/assert/收敛等待的超时秒数（CI 环境偏慢时可调大）",
     )
 
+    scenario_run.add_argument("--observe", action="store_true", help="在 session 中记录实时步骤事件")
+
+    watch = subparsers.add_parser("watch", help="在本机浏览器实时查看 Scenario 进度")
+    _add_project_option(watch)
+    watch.add_argument("--session-id", help="固定会话 ID；不指定则跟随最新可监看的 Scenario")
+    watch.add_argument("--port", type=int, default=0, help="本机端口；默认随机分配")
+
+    runs = subparsers.add_parser("runs", help="统一查询 Agent、Scenario、UTF 和 Midscene 运行记录")
+    _add_project_option(runs)
+    run_records = runs.add_subparsers(dest="runs_command", required=True)
+    runs_list = run_records.add_parser("list", help="按时间列出本机运行")
+    runs_list.add_argument("--kind", choices=("agent", "scenario", "utf", "midscene"))
+    runs_list.add_argument("--limit", type=int, default=20, help="最多显示 1–200 条")
+    runs_show = run_records.add_parser("show", help="查看失败步骤、截图及日志文件")
+    runs_show.add_argument("key", metavar="KIND:ID")
+
+    agent_run.add_parser(subparsers)
+
     scenario_validate = scenario_subparsers.add_parser(
         "validate",
         help="只做字段/结构校验，不连接 Bridge、不创建 session",
@@ -921,6 +1083,18 @@ def build_parser() -> argparse.ArgumentParser:
             ),
         )
 
+    test = subparsers.add_parser("test", help="运行 Unity Test Framework 并查询任务结果")
+    _add_project_option(test)
+    test_commands = test.add_subparsers(dest="test_command", required=True)
+    test_run = test_commands.add_parser("run", help="启动独立 Unity 进程并等待 UTF 完成")
+    test_run.add_argument("--mode", choices=("EditMode", "PlayMode"), required=True)
+    test_run.add_argument("--filter", help="Unity -testFilter 表达式")
+    test_run.add_argument("--job-id", help="预先指定任务 ID，供另一个进程查询")
+    test_run.add_argument("--timeout", type=float, default=900, help="超时（秒）")
+    test_run.add_argument("--unity", type=Path, help="临时覆盖 Unity Editor 路径")
+    test_status = test_commands.add_parser("status", help="读取已开始的任务或最终报告")
+    test_status.add_argument("job_id")
+
     return parser
 
 
@@ -960,12 +1134,21 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "refresh": cmd_refresh,
         "doctor": cmd_doctor,
         "build": cmd_build,
+        "test": cmd_test,
+        "watch": cmd_watch,
+        "agent-run": cmd_agent_run,
+        "runs": cmd_runs,
+        "build-size": cmd_build_size,
         "health": cmd_health,
         "hierarchy": cmd_hierarchy,
         "snapshot": cmd_snapshot,
+        "hit-test": cmd_hit_test,
         "click": cmd_click,
+        "click-at": cmd_click_at,
         "input": cmd_input,
         "set-value": cmd_set_value,
+        "long-press": cmd_long_press,
+        "drag": cmd_drag,
         "gameplay": cmd_gameplay,
         "record": cmd_record,
         "profile": cmd_profile,
@@ -1562,6 +1745,7 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         reason=args.reason,
         max_long_edge=args.max_long_edge,
         target_directory=args.target_directory,
+        annotate=bool(getattr(args, "annotate", False)),
     )
     if not start_response.get("ok", False):
         raise CliError(
@@ -1583,7 +1767,7 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         raise CliError("editor_exited", str(exc)) from exc
 
     result = job.get("result") or {}
-    return {
+    response = {
         "ok": True,
         "code": "ok",
         "jobId": job_id,
@@ -1591,6 +1775,51 @@ def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         "width": result.get("width"),
         "height": result.get("height"),
     }
+    for key in (
+        "annotatedPath",
+        "annotationsPath",
+        "coordinateSpace",
+        "agentImageAccess",
+        "referenceScreen",
+        "scale",
+        "annotationMeta",
+    ):
+        if key in result:
+            response[key] = result[key]
+    return response
+
+
+def cmd_hit_test(args: argparse.Namespace) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "capture", "POST", "capture/hit-test")
+    return client.capture_hit_test(
+        x=args.x,
+        y=args.y,
+        image_width=args.image_width,
+        image_height=args.image_height,
+    )
+
+
+def cmd_click_at(args: argparse.Namespace) -> dict[str, Any]:
+    dimensions = (args.image_width, args.image_height, args.reference_width, args.reference_height)
+    if not all(0 < dim <= 2**31 - 1 for dim in dimensions) or not (
+        0 <= args.x < args.image_width and 0 <= args.y < args.image_height
+    ):
+        raise CliError("invalid_argument", "尺寸必须为正整数，坐标必须位于截图内")
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "interaction", "POST", "interaction/click-at")
+    return client.interaction_click_at(
+        x=args.x,
+        y=args.y,
+        image_width=args.image_width,
+        image_height=args.image_height,
+        reference_width=args.reference_width,
+        reference_height=args.reference_height,
+    )
 
 
 def cmd_click(args: argparse.Namespace) -> dict[str, Any]:
@@ -1616,6 +1845,89 @@ def cmd_set_value(args: argparse.Namespace) -> dict[str, Any]:
     _require_capability(client, "interaction")
     value = _parse_value_arg(args.value)
     return client.interaction_set_value(path=args.path, value=value, component=args.component, scene=args.scene)
+
+
+def cmd_long_press(args: argparse.Namespace) -> dict[str, Any]:
+    return _wait_gesture_job(
+        args,
+        route_path="interaction/long-press",
+        start_fn=lambda client: client.interaction_long_press(
+            path=args.path,
+            duration_seconds=args.duration_seconds,
+            force=args.force,
+            scene=args.scene,
+        ),
+    )
+
+
+def cmd_drag(args: argparse.Namespace) -> dict[str, Any]:
+    return _wait_gesture_job(
+        args,
+        route_path="interaction/drag",
+        start_fn=lambda client: client.interaction_drag(
+            path=args.path,
+            delta_x=args.delta_x,
+            delta_y=args.delta_y,
+            duration_seconds=args.duration_seconds,
+            steps=args.steps,
+            force=args.force,
+            scene=args.scene,
+        ),
+    )
+
+
+def _wait_gesture_job(args: argparse.Namespace, route_path: str, start_fn) -> dict[str, Any]:
+    project_path = args.project_path or Path.cwd()
+    info = discover(project_path)
+    client = BridgeClient(info.base_url, info.token)
+    require_bridge_route(client, "interaction", "POST", route_path)
+
+    start_response = start_fn(client)
+    if not start_response.get("ok", False):
+        raise CliError(
+            start_response.get("code", "internal_error"),
+            start_response.get("message", "启动手势 job 失败"),
+        )
+
+    job_id = start_response.get("jobId")
+    if not job_id:
+        # 同步失败（例如 occluded）已直接返回
+        return start_response
+
+    try:
+        timeout_seconds = (
+            args.timeout
+            if args.timeout is not None
+            else max(
+                DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS,
+                float(args.duration_seconds) + 6.0,
+            )
+        )
+        job = wait_for_job(
+            project_path,
+            job_id,
+            timeout_seconds=timeout_seconds,
+            initial_info=info,
+        )
+    except JobFailed as exc:
+        evidence = (exc.job or {}).get("result") or {}
+        raise CliError(
+            exc.job.get("errorCode", "internal_error"),
+            exc.job.get("errorMessage", "手势失败"),
+            extra=evidence if evidence else None,
+        ) from exc
+    except JobTimeout as exc:
+        raise CliError("timeout", str(exc)) from exc
+    except JobEditorExited as exc:
+        raise CliError("editor_exited", str(exc)) from exc
+
+    result = job.get("result") or {}
+    return {
+        "ok": True,
+        "code": "ok",
+        "jobId": job_id,
+        **result,
+    }
 
 
 def cmd_gameplay(args: argparse.Namespace) -> dict[str, Any]:
@@ -1742,21 +2054,42 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
     client.start_session(session.session_id, str(session.session_path))
     update_session_status(session.session_path, "running", started_at=format_time(utc_now()))
 
+    events = RunEvents(session.session_path) if getattr(args, "observe", False) else None
     ctx = ScenarioContext(
         client=client,
         session_path=session.session_path,
+        event_sink=events.emit if events else None,
         capture_config=_load_capture_config(effective.project_path),
         timeout_scale=args.timeout_scale,
         screenshot_target_directory=str(session.session_path / "artifacts"),
+        job_wait_fn=lambda job_id, timeout_seconds, raise_on_failure: wait_for_job(
+            effective.project_path,
+            job_id,
+            timeout_seconds=timeout_seconds,
+            initial_info=info,
+            raise_on_failure=raise_on_failure,
+        ),
     )
 
     try:
+        if events:
+            events.emit("run-started", {"name": session_name, "status": "running", "stepsTotal": len(scenario_data["steps"])})
         result = run_scenario(scenario_data, ctx)
+    except KeyboardInterrupt as exc:
+        if events:
+            events.emit("run-finished", {"status": "interrupted", "code": "scenario_interrupted"})
+        _abort_bridge_session(client)
+        _finalize_failed_session(session.session_path, effective.project_path, "scenario_interrupted")
+        raise CliError("scenario_interrupted", "Scenario 已由调用者中断") from exc
     except ScenarioValidationError as exc:
+        if events:
+            events.emit("run-finished", {"status": "failed", "code": "invalid_scenario"})
         _abort_bridge_session(client)
         _finalize_failed_session(session.session_path, effective.project_path, "invalid_scenario")
         raise CliError("invalid_scenario", "; ".join(exc.errors)) from exc
     except Exception as exc:  # noqa: BLE001 - 任何未预期异常都要保证 session 收尾落盘，而不是留下悬空 session
+        if events:
+            events.emit("run-finished", {"status": "failed", "code": "scenario_execution_error"})
         _abort_bridge_session(client)
         _finalize_failed_session(session.session_path, effective.project_path, "scenario_execution_error")
         raise CliError("scenario_execution_error", str(exc)) from exc
@@ -1774,6 +2107,8 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
         session.session_path, load_log_rules(effective.project_path), scenario_result=result
     )
     write_summary(session.session_path, summary_payload)
+    if events:
+        events.emit("run-finished", {"status": result["status"]})
 
     return {
         "ok": result["status"] == "passed",
@@ -1885,6 +2220,59 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
 
 
+def cmd_runs(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.project_path or Path.cwd())
+    if args.runs_command == "list":
+        if not 1 <= args.limit <= 200:
+            raise CliError("invalid_argument", "--limit 必须在 1 至 200 之间")
+        return {"ok": True, **list_runs(project, args.kind, args.limit)}
+    try:
+        # This command reads evidence; its own success is independent of the recorded result.
+        return {"ok": True, "record": show_run(project, args.key)}
+    except RunRecordError as exc:
+        raise CliError("run_record_unavailable", str(exc)) from exc
+
+
+def cmd_agent_run(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.global_project_path or Path.cwd())
+    try:
+        return agent_run.run_agent(project, args, build_parser().parse_args, dispatch, lambda exc: {
+            "ok": False, "code": _error_code(exc), "message": str(exc),
+        })
+    except (agent_run.AgentRunError, OSError) as exc:
+        raise CliError("agent_run_unavailable", str(exc)) from exc
+
+
+def cmd_watch(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.project_path or Path.cwd())
+    if not 0 <= args.port <= 65535:
+        raise CliError("invalid_argument", "端口必须在 0 至 65535 之间")
+    try:
+        server, url = create_watch_server(project, args.port, args.session_id)
+    except (OSError, ValueError) as exc:
+        raise CliError("watch_unavailable", str(exc)) from exc
+    with server:
+        print(json.dumps({"ok": True, "url": url}, ensure_ascii=False), flush=True)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+    return {"ok": True, "code": "ok", "status": "stopped"}
+
+
+def cmd_test(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        if args.test_command == "status":
+            return read_test_job(find_unity_project_root(args.project_path or Path.cwd()), args.job_id)
+        effective = resolve_effective_config(project_path=args.project_path)
+        return run_tests(
+            effective.project_path, args.unity or effective.unity_executable_path,
+            mode=args.mode, test_filter=args.filter, job_id=args.job_id, timeout=args.timeout,
+        )
+    except UtfError as exc:
+        raise CliError(exc.code, str(exc)) from exc
+
+
 def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
     effective = resolve_effective_config(project_path=args.project_path)
     timeout_seconds = (
@@ -1898,6 +2286,7 @@ def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
             target=args.target,
             output_path=args.output_path,
             timeout_seconds=timeout_seconds,
+            clean=args.clean,
         )
     except BuildError as exc:
         raise CliError(exc.code, str(exc)) from exc
@@ -1917,6 +2306,37 @@ def cmd_build(args: argparse.Namespace) -> dict[str, Any]:
         "warnings": report.get("warnings", []),
         "reportSource": report.get("reportSource"),
     }
+
+
+def cmd_build_size(args: argparse.Namespace) -> dict[str, Any]:
+    if not any((args.build_dir, args.log, args.artifact, args.scan_platform)):
+        raise CliError("invalid_request", "请指定 --build-dir、--log、--artifact 或 --scan-platform")
+    if not 1 <= args.top <= 1000:
+        raise CliError("invalid_request", "--top 必须在 1 至 1000 之间")
+
+    def budget_bytes(raw: str | None, option: str) -> int | None:
+        if raw is None:
+            return None
+        try:
+            value = Decimal(raw)
+        except InvalidOperation as exc:
+            raise CliError("invalid_request", f"{option} 必须是有限正数") from exc
+        if not value.is_finite() or not Decimal(1) / 2**20 <= value <= 2**40:
+            raise CliError("invalid_request", f"{option} 必须是有限正数，且预算至少 1 字节")
+        return int(value * 2**20)
+
+    result = analyze_build_size(
+        build_dir=args.build_dir.expanduser() if args.build_dir is not None else None,
+        log=args.log.expanduser() if args.log is not None else None,
+        artifact=args.artifact.expanduser() if args.artifact is not None else None,
+        report_budget_bytes=budget_bytes(args.report_budget_mib, "--report-budget-mib"),
+        artifact_budget_bytes=budget_bytes(args.artifact_budget_mib, "--artifact-budget-mib"),
+        top=args.top,
+    )
+    if args.scan_platform:
+        project = find_unity_project_root(args.project_path or Path.cwd())
+        result["assetScan"] = scan_build_assets(project, args.scan_platform, args.max_texture_size)
+    return result
 
 
 def cmd_health(args: argparse.Namespace) -> dict[str, Any]:
@@ -2050,7 +2470,7 @@ def print_json(payload: dict[str, Any], stream: Any = None) -> None:
 def confirm_init(project_path: Path, force: bool = False) -> None:
     if not sys.stdin.isatty():
         raise ValueError("init 需要确认项目路径；在脚本中请添加 --yes")
-    action = "重新生成缺失或已有配置" if force else "初始化缺失配置"
+    action = "覆盖已有 config.json / config.local.json" if force else "初始化缺失配置"
     print(f"将为以下 Unity 项目{action}：", file=sys.stderr)
     print(str(project_path), file=sys.stderr)
     answer = input("是否继续？[y/N] ").strip().lower()

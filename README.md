@@ -11,15 +11,18 @@ UnityRunBridge 提供一个轻量级的 Editor-only Unity 包和一个 Python CL
 - 触发脚本重编译并等待结果（`unityctl refresh`）。
 - 诊断本机环境与 Bridge 连通性（`unityctl doctor`）。
 - 只读查询场景 Hierarchy 结构（`unityctl hierarchy`）与 Play Mode 截图（`unityctl snapshot`）。
-- 在安装 UGUI 时模拟点击 / 输入 / 设值（`click` / `input` / `set-value`），带射线遮挡验证。
+- 在安装 UGUI 时支持按节点或 Game View 截图坐标点击，以及输入 / 设值（`click` / `click-at` / `input` / `set-value`）。
+- 可选 [Midscene Game View 示例](examples/midscene-game-view/README.md)：从 Play Mode 截图定位、点击 UGUI 并做视觉断言，不引入第二套 Bridge。
 - 零侵入调用游戏侧暴露的命令（`unityctl gameplay`，默认关闭）。
 - 录制 UGUI 语义动作为 `actions.jsonl`（`unityctl record`，需 UGUI），供复盘或生成 scenario 草稿。
 - 用 JSON 文件固化「操作 → 断言」的自动化验证脚本并可重复执行（`unityctl scenario`）。
 - `ProfilerRecorder` 逐帧性能采样，用于改动前后的相对回归比较（`unityctl profile`）。
 - 独立进程执行 Player 构建并生成结构化报告（`unityctl build`）。
-- 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性（`unityctl health`）。
+- 项目健康检查：编译、缺失脚本引用、构建场景列表、包一致性与离线资源检查（`unityctl health`）。
 
 Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17890` 开始，被占用会自动顺延），实际端口和鉴权 token 由 Unity 写入项目内的 `.unity-agent/bridge.json` 握手文件，CLI 会自动读取，不需要手动配置。
+
+[Unity 2022.3 回归验收](docs/unity-2022-smoke.md)：可复跑 UTF、横竖屏截图与坐标点击，并提取失败证据。
 
 ## 环境要求
 
@@ -65,12 +68,12 @@ Bridge 在 Unity Editor 内监听 `127.0.0.1` 上的某个端口（默认从 `17
 
 | 安装组合 | 典型可选依赖 | 路由 / capability | 说明 |
 |----------|--------------|-------------------|------|
-| Core-only（NoUGUI） | 无 | **24 / 7** | 无 `interaction`、`recording`；`hierarchy`/`capture`/`profiling`/`health` 等仍可用 |
-| UGUI + Legacy Input | `com.unity.ugui` | **30 / 9** | 含 `interaction`、`recording`；指针走 Legacy Input Manager |
-| UGUI + Input System | `ugui` + `com.unity.inputsystem` | **30 / 9** | Player Settings 中 Active Input Handling 设为 Input System Package 或 Both |
-| UGUI + Both | 同上 + Legacy 仍启用 | **30 / 9** | 两套指针后端并存时 Input System 优先（Priority 更高） |
-| UGUI + TMP | `ugui` + `com.unity.textmeshpro` | **30 / 9** | TMP 文本 / `TMP_InputField` / `TMP_Dropdown` 富化；需导入 TMP Essential Resources |
-| Full | `ugui` + TMP + Input System | **30 / 9** | 仓库测试矩阵的完整组合 |
+| Core-only（NoUGUI） | 无 | **25 / 7** | 无 `interaction`、`recording`；`hierarchy`/`capture`/`profiling`/`health` 等仍可用 |
+| UGUI + Legacy Input | `com.unity.ugui` | **34 / 9** | 含 `interaction`、`recording`；指针走 Legacy Input Manager |
+| UGUI + Input System | `ugui` + `com.unity.inputsystem` | **34 / 9** | Player Settings 中 Active Input Handling 设为 Input System Package 或 Both |
+| UGUI + Both | 同上 + Legacy 仍启用 | **34 / 9** | 两套指针后端并存时 Input System 优先（Priority 更高） |
+| UGUI + TMP | `ugui` + `com.unity.textmeshpro` | **34 / 9** | TMP 文本 / `TMP_InputField` / `TMP_Dropdown` 富化；需导入 TMP Essential Resources |
+| Full | `ugui` + TMP + Input System | **34 / 9** | 仓库测试矩阵的完整组合 |
 
 - 缺 UGUI 时执行 `click` / `input` / `set-value` / `record`，CLI 返回 `bridge_capability_missing`（不是笼统 404）。
 - 示例 manifest：[`examples/unity-project-manifest/`](examples/unity-project-manifest/)（`core-only.json`、`ugui-legacy.json`、`ugui-inputsystem.json`、`ugui-tmp.json`、`full.json`）。
@@ -135,12 +138,17 @@ uv run unityctl --help
 | `doctor` | 诊断项目配置与 Bridge 连通性 |
 | `hierarchy roots/tree/find/ancestors/inspect` | 只读查询场景 Hierarchy 结构 |
 | `snapshot` | Play Mode 截图（落盘 PNG） |
+| `click-at` | 按截图像素点击最上层 UGUI 命中点；Game View 尺寸变化时拒绝执行 |
 | `click` / `input` / `set-value` | 模拟 UGUI 点击 / 输入 / 设值（需 Play Mode，且项目已安装 UGUI） |
 | `gameplay list` / `gameplay invoke` | 零侵入调用游戏侧暴露的命令（默认关闭） |
 | `record start` / `record status` / `record stop` | 录制 UGUI 语义动作到 `actions.jsonl`（需 UGUI） |
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
+| [`runs list` / `runs show`](docs/unityctl-runs.md) | 在同一入口查看 Agent、Scenario、UTF、Midscene 的失败、截图和日志 |
+| [`watch` / `agent-run`](docs/unityctl-watch.md) | 本地中文监看：跟随 Scenario 或 Agent 的实际操作，查看理由、命令、截图、点击落点和断言 |
+| [`test run` / `test status`](docs/unityctl-utf.md) | 在独立 Unity 进程运行 UTF EditMode / PlayMode，查询结构化结果 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
+| `build-size` | 离线分析构建大小、交付预算和资源导入线索 |
 | `health` | 项目健康检查（编译/缺失脚本/构建场景/包一致性） |
 | `skills init` / `skills update` | 安装 / 更新内置 agent skills（unityctl 参考手册 + project skill creator） |
 
@@ -172,7 +180,7 @@ unityctl init
 .unity-agent/.gitignore
 ```
 
-如果已经初始化，`init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，由 `.unity-agent/.gitignore` 忽略（`init` 会维护该文件，缺失才补）。
+如果已经初始化，默认的 `init` 只补缺失文件，不会覆盖已有的 `config.json` / `config.local.json`（内置 schema 文件除外，它们总是被刷新）。**只有要重置这两个配置时才使用 `--force`，该选项会覆盖已有内容。**`config.json` 保存可提交的项目配置，例如 Unity 版本、Bridge 期望端口和超时时间。`config.local.json` 保存本机配置，例如 Unity 可执行文件路径，由 `.unity-agent/.gitignore` 忽略（`init` 会维护该文件，缺失才补）。
 
 `init` 还会检测 `Packages/manifest.json` 是否已包含 `com.mk.unity-agent-bridge` 依赖：
 
@@ -355,6 +363,8 @@ unityctl scenario run draft.json                          # 执行并生成 sess
 
 scenario 用 JSON 文件把「打开场景 → 操作 UI → 等待收敛 → 断言事实」固化成可重复执行、机器判定通过/失败的脚本；断言判定全部在 CLI 侧完成。字段结构见 `schemas/scenario.schema.json`。
 
+[UI 回归示例](examples/verification/ui/README.md) 使用两种固定分辨率，验证弹窗打开与关闭的焦点变化，并强制保留尺寸正确的 PNG。布局裁切、对比度和实际手柄导航仍需人工验收。
+
 ## 性能采样与 Build 诊断
 
 ```bash
@@ -367,14 +377,30 @@ unityctl build --target StandaloneOSX                     # 独立 batchmode 进
 
 `profile` 的采样值含 Editor 自身开销，只适合同机同项目改动前后的相对回归比较。`build` 会在独立 Unity 进程里执行（与正在运行的交互式 Editor 互斥，不会自动关闭），产物落在 `.unity-agent/builds/<buildId>/`，含 `build-report.json` 与 `build.log`。
 
+### Editor 性能回归
+
+[性能回归示例](examples/verification/performance/README.md) 固定场景、预热和采样窗口，先取得三轮基线，再用 scenario 检查主线程与 GC 分配 p95。样本不足或中断不能通过预算。Editor 结果只用于同机相对比较。
+
+### 构建体积诊断
+
+```bash
+unityctl build --target StandaloneOSX --clean
+unityctl build-size --build-dir <本次构建归档路径> --report-budget-mib 200 --top 20
+unityctl build-size --artifact MyGame.zip --artifact-budget-mib 100
+unityctl build-size --scan-platform Android --max-texture-size 2048
+```
+
+`build-size` 不启动 Unity。日志未压缩统计、Unity 构建摘要和交付文件实测分别输出；预算缺证据时返回非零，不用旧构建或静态扫描代替。增量构建可能没有资源明细，配套更新 CLI 和 Unity 包后可用 `build --clean` 让 Unity 完整重建 Player 数据。静态扫描不是构建依赖分析，也不会修改导入设置。
+
 ## 项目健康检查
 
 ```bash
 unityctl health                                            # 跑全部检查项
 unityctl health --check compilation,missing_scripts        # 只跑指定项
+unityctl health --check assets                             # 离线检查 .meta、GUID 与文本脚本引用
 ```
 
-四项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
+五项独立检查：`compilation`（编译）、`missing_scripts`（已加载场景 + 全部 Prefab 资产的缺失脚本引用）、`build_scenes`（构建场景列表）、`packages`（UPM 包一致性）、`assets`（离线资源检查）。`compilation`/`missing_scripts` 需要 Bridge，不可达时该项标记 `skipped` 而不计入整体失败。
 
 以上各命令的完整参数、错误码和判读规则见内置的 [`unityctl` agent skill](src/unityctl/unityctl/skill_assets/unityctl/SKILL.md)（`unityctl skills init` 后也会安装到你的 Unity 项目里）。
 
@@ -401,6 +427,8 @@ unityctl skills init --target ~/.claude/skills        # 安装到全局目录（
 - `skills update`：与内置内容有差异时整目录覆盖刷新（未安装则直接安装，无差异返回 `up_to_date`）；升级 CLI 后运行一次即可同步 skill。
 
 skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的 CLI 版本。
+
+内置 Skill 的触发范围可用[中英双语触发评测](evals/README.md)检查。离线自检随 Python 测试运行；盲评可独立导出与评分。
 
 ## 为你的项目编写自定义 skill
 

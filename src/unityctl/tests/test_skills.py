@@ -317,3 +317,14 @@ def test_real_assets_install(tmp_path, capsys):
     assert (
         project / ".agents" / "skills" / "unityctl" / "references" / "error-codes.md"
     ).exists()
+
+
+def test_bundled_observation_reference_is_installed(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    run_skills(project, "init", capsys)
+    installed = project / ".agents/skills/unityctl"
+    index = (installed / "SKILL.md").read_text(encoding="utf-8")
+    reference = (installed / "references/observation.md").read_text(encoding="utf-8")
+    assert "references/observation.md" in index
+    for command in ("unityctl watch", "scenario run PATH --observe", "unityctl runs show KEY"):
+        assert command in reference

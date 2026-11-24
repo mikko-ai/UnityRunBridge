@@ -98,6 +98,37 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI.Tests
         }
 
         [Test]
+        public void AnnotationBackend_IsRegistered()
+        {
+            Assert.IsTrue(runtime.Services.TryGet(out IUiAnnotationBackend backend));
+            Assert.IsNotNull(backend);
+        }
+
+        [Test]
+        public void HitTestBackend_IsRegistered()
+        {
+            Assert.IsTrue(runtime.Services.TryGet(out IUiHitTestBackend backend));
+            Assert.IsNotNull(backend);
+            IReadOnlyList<UiHitResult> hits = backend.Raycast(new Vector2(10, 10));
+            Assert.IsNotNull(hits);
+        }
+
+        [Test]
+        public void GestureBackend_IsRegistered()
+        {
+            Assert.IsTrue(runtime.Services.TryGet(out IInteractionGestureBackend backend));
+            Assert.IsNotNull(backend);
+        }
+
+        [Test]
+        public void AnnotationBackend_IndexToLabel_IsStable()
+        {
+            Assert.AreEqual("A", UguiAnnotationBackend.IndexToLabel(0));
+            Assert.AreEqual("Z", UguiAnnotationBackend.IndexToLabel(25));
+            Assert.AreEqual("AA", UguiAnnotationBackend.IndexToLabel(26));
+        }
+
+        [Test]
         public void RecordingSemantic_ResolveClickTarget_DoesNotThrow()
         {
             Spawn("UguiRaycast_ES").AddComponent<EventSystem>();

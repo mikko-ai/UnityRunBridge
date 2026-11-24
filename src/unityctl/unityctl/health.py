@@ -1,25 +1,26 @@
 """项目健康检查：`unityctl doctor` 回答「环境能不能跑」（Bridge/UPM 包/进程占用），
 `unityctl health` 回答「项目干不干净」（编译、缺失脚本、构建场景列表、包一致性）。
-四个检查项各自独立、互不依赖，未来新增检查项只需要往 `CHECK_FUNCTIONS` 里注册一个函数。
+各检查项独立、互不依赖，未来新增检查项只需要往 `CHECK_FUNCTIONS` 里注册一个函数。
 
 需要 Bridge 的检查项（compilation / missing_scripts）在 Bridge 不可达时标记为
 `skipped` 并说明原因，不计入整体 pass/warn/fail 判定——跑 health 不应该逼着 agent
-先启动 Unity Editor，纯静态的检查项（build_scenes / packages）任何时候都能跑。
+先启动 Unity Editor，纯静态的检查项（build_scenes / packages / assets）任何时候都能跑。
 """
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from unityctl.asset_audit import audit_assets
 from unityctl.client import BridgeClient, BridgeClientError
 from unityctl.config import EffectiveConfig
 from unityctl.convergence import ConvergenceEditorExited, ConvergenceTimeout, poll_until
 from unityctl.discovery import BridgeInfo, DiscoveryError, discover
 from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
 
-ALL_CHECKS: tuple[str, ...] = ("compilation", "missing_scripts", "build_scenes", "packages")
+ALL_CHECKS: tuple[str, ...] = ("compilation", "missing_scripts", "build_scenes", "packages", "assets")
 
 _STATUS_RANK = {"pass": 0, "skipped": 0, "warn": 1, "fail": 2}
 
@@ -249,11 +250,40 @@ def check_packages(ctx: HealthContext) -> dict[str, Any]:
     return _result("packages", status, details)
 
 
+def check_assets(ctx: HealthContext) -> dict[str, Any]:
+    report = audit_assets(ctx.project_path)
+    issues = report.issues
+    status = "fail" if any(issue.level == "error" for issue in issues) else (
+        "warn" if issues or report.unresolved_packages or report.unchecked else "pass"
+    )
+    shown = issues[:100]
+    details = [
+        f"[{issue.code}] {issue.file}{f':{issue.line}' if issue.line else ''}：{issue.message}"
+        for issue in shown
+    ]
+    if report.unresolved_packages:
+        details.append("未能检查的包：" + ", ".join(report.unresolved_packages))
+    if report.unchecked:
+        details.append("部分内容未验证：" + ", ".join(
+            f"{key}={count}" for key, count in sorted(report.unchecked.items())
+        ))
+    return {
+        **_result("assets", status, details),
+        "issues": [asdict(issue) for issue in shown],
+        "issueCount": len(issues),
+        "filesChecked": report.files_checked,
+        "unresolvedPackages": report.unresolved_packages,
+        "unchecked": dict(report.unchecked),
+        "truncated": len(shown) < len(issues),
+    }
+
+
 CHECK_FUNCTIONS: dict[str, Callable[[HealthContext], dict[str, Any]]] = {
     "compilation": check_compilation,
     "missing_scripts": check_missing_scripts,
     "build_scenes": check_build_scenes,
     "packages": check_packages,
+    "assets": check_assets,
 }
 
 

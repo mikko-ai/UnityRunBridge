@@ -20,6 +20,8 @@
 | `not_in_play_mode` | UI 操作命令需要 Play Mode（暂停中也算不满足），先 `unityctl play` / `unityctl resume` |
 | `no_event_system` | 场景中没有 `EventSystem`，UI 操作无法派发 |
 | `occluded` | `click` 命中了另一个元素（见响应 `blockedBy`），确认是否符合预期遮挡，或用 `--force` 调试 |
+| `game_view_resized` | 丢弃旧截图，重新抓取并定位；不能只改参数重放 |
+| `click_not_dispatched` | 已处理指针事件，但未派发点击；先检查当前界面再决定是否操作 |
 | `no_click_handler` / `not_interactable` | 目标节点链上没有点击处理器，或 `interactable=false`/祖先 `CanvasGroup` 禁用 |
 | `not_input_field` | `input` 目标节点没有 `InputField`/`TMP_InputField` 组件 |
 | `unsupported_set_value` / `ambiguous_component` | `set-value` 组件不在支持列表内，或节点上有多个可设值组件需显式传 `--component` |

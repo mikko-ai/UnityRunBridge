@@ -1,0 +1,12 @@
+{
+  "name": "unityrunbridge-midscene-game-view-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@midscene/core": "1.18.2"
+  }
+}

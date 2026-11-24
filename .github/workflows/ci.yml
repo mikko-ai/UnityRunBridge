@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,3 +28,56 @@ jobs:
 
       - name: Run Python tests
         run: bash scripts/run-python-tests.sh
+
+  midscene-adapter:
+    name: Midscene adapter (no model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/midscene-game-view
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: examples/midscene-game-view/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run adapter tests
+        run: npm test
+
+  package-upm:
+    name: Package UPM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package UPM tarball
+        id: package
+        run: |
+          ARCHIVE_PATH="$(bash scripts/package-upm.sh | tail -n 1)"
+          if [[ ! -f "$ARCHIVE_PATH" ]]; then
+            echo "打包产物不存在：$ARCHIVE_PATH"
+            exit 1
+          fi
+          echo "archive_path=${ARCHIVE_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify schemas and tarball contents
+        run: bash .github/scripts/verify-upm-package.sh "${{ steps.package.outputs.archive_path }}"
+
+      - name: Upload UPM tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: upm-package-${{ github.run_id }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 14

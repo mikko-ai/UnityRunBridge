@@ -15,12 +15,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from unityctl.client import BridgeClient, BridgeClientError
+from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
+from unityctl.jobs import JobFailed, JobTimeout, poll_job_with_client
+from unityctl.run_events import click_marker, frame_name
 from unityctl.summary import read_jsonl
 
 
 CONTROL_ACTIONS = {"open-scene", "play", "stop", "pause", "resume"}
-OPERATION_ACTIONS = {"click", "input", "set-value", "invoke"}
+OPERATION_ACTIONS = {"click", "input", "set-value", "invoke", "long-press", "drag"}
 OBSERVATION_ACTIONS = {"screenshot", "snapshot"}
 PROFILING_ACTIONS = {"profile-start", "profile-stop"}
 CONDITION_ACTIONS = {"wait-for", "assert"}
@@ -35,6 +37,10 @@ COMPARE_OPS = ("equals", "notEquals", "greaterThan", "lessThan", "atLeast", "atM
 
 DEFAULT_WAIT_TIMEOUT_SECONDS = 10.0
 DEFAULT_SCREENSHOT_JOB_TIMEOUT_SECONDS = 10.0
+DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS = 15.0
+MAX_GESTURE_DURATION_SECONDS = 3600.0
+MAX_GESTURE_STEPS = 4096
+MAX_FLOAT32 = 3.4028235e38
 
 
 class ScenarioValidationError(RuntimeError):
@@ -62,6 +68,9 @@ def validate_scenario(scenario: Any) -> list[str]:
     defaults = scenario.get("defaults", {})
     if defaults is not None and not isinstance(defaults, dict):
         errors.append("defaults 必须是 JSON 对象")
+    elif isinstance(defaults, dict) and "waitTimeoutSeconds" in defaults:
+        if not _is_finite_number_in_range(defaults["waitTimeoutSeconds"], exclusive_min=0):
+            errors.append("defaults.waitTimeoutSeconds 必须是有限正数")
 
     steps = scenario.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -82,14 +91,49 @@ def validate_scenario(scenario: Any) -> list[str]:
 
         if action == "open-scene" and not step.get("scene"):
             errors.append(f"{prefix}: open-scene 需要 scene 字段")
-        elif action in {"click", "input", "set-value"} and not step.get("path"):
+        elif action in {"click", "input", "set-value", "long-press", "drag"} and not step.get("path"):
             errors.append(f"{prefix}: {action} 需要 path 字段")
         if action == "input" and "text" not in step:
             errors.append(f"{prefix}: input 需要 text 字段")
         if action == "set-value" and "value" not in step:
             errors.append(f"{prefix}: set-value 需要 value 字段")
+        if action == "drag" and ("deltaX" not in step or "deltaY" not in step):
+            errors.append(f"{prefix}: drag 需要 deltaX 与 deltaY 字段")
         if action == "invoke" and not step.get("command"):
             errors.append(f"{prefix}: invoke 需要 command 字段")
+
+        if action in {"long-press", "drag"}:
+            if "durationSeconds" in step and not _is_finite_number_in_range(
+                step["durationSeconds"], exclusive_min=0, inclusive_max=MAX_GESTURE_DURATION_SECONDS
+            ):
+                errors.append(
+                    f"{prefix}: durationSeconds 必须是大于 0 且不超过 "
+                    f"{MAX_GESTURE_DURATION_SECONDS:g} 的有限数字"
+                )
+
+        if action == "drag":
+            for field_name in ("deltaX", "deltaY"):
+                if field_name in step and not _is_finite_number_in_range(
+                    step[field_name], inclusive_min=-MAX_FLOAT32, inclusive_max=MAX_FLOAT32
+                ):
+                    errors.append(f"{prefix}: {field_name} 必须是 float 范围内的有限数字")
+
+            if "steps" in step:
+                steps = step["steps"]
+                if isinstance(steps, bool) or not isinstance(steps, int) or not 1 <= steps <= MAX_GESTURE_STEPS:
+                    errors.append(
+                        f"{prefix}: steps 必须是 1 到 {MAX_GESTURE_STEPS} 之间的整数"
+                    )
+
+        if "expectedSize" in step and (
+            action not in OBSERVATION_ACTIONS or not _valid_screenshot_size(step["expectedSize"])
+        ):
+            errors.append(f"{prefix}: expectedSize 仅用于截图且需指定正整数 width 与 height")
+
+        if "timeoutSeconds" in step and not _is_finite_number_in_range(
+            step["timeoutSeconds"], exclusive_min=0
+        ):
+            errors.append(f"{prefix}: timeoutSeconds 必须是有限正数")
 
         if action in CONDITION_ACTIONS:
             sources = [key for key in CONDITION_SOURCES if key in step]
@@ -108,11 +152,37 @@ def validate_scenario(scenario: Any) -> list[str]:
                         errors.append(f"{prefix}: 重复的断言 id '{step_id}'")
                     seen_assert_ids.add(step_id)
 
-            timeout_value = step.get("timeoutSeconds")
-            if timeout_value is not None and not isinstance(timeout_value, (int, float)):
-                errors.append(f"{prefix}: timeoutSeconds 必须是数字")
-
     return errors
+
+
+def _is_finite_number_in_range(
+    value: Any,
+    *,
+    exclusive_min: float | None = None,
+    inclusive_min: float | None = None,
+    inclusive_max: float | None = None,
+) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        numeric = float(value)
+    except (OverflowError, ValueError):
+        return False
+    if not math.isfinite(numeric):
+        return False
+    if exclusive_min is not None and numeric <= exclusive_min:
+        return False
+    if inclusive_min is not None and numeric < inclusive_min:
+        return False
+    if inclusive_max is not None and numeric > inclusive_max:
+        return False
+    return True
+
+
+def _valid_screenshot_size(value: Any) -> bool:
+    return isinstance(value, dict) and set(value) == {"width", "height"} and all(
+        type(dimension) is int and dimension > 0 for dimension in value.values()
+    )
 
 
 def _validate_condition(source: str, condition: Any, prefix: str) -> list[str]:
@@ -135,6 +205,10 @@ def _validate_condition(source: str, condition: Any, prefix: str) -> list[str]:
         aggregate = condition.get("aggregate")
         if aggregate is not None and aggregate not in METRIC_AGGREGATES:
             errors.append(f"{prefix}: metric.aggregate 必须是 {'/'.join(METRIC_AGGREGATES)} 之一")
+        if "minSamples" in condition and (
+            type(condition["minSamples"]) is not int or condition["minSamples"] < 1
+        ):
+            errors.append(f"{prefix}: metric.minSamples 必须是正整数")
         errors.extend(_validate_compare_ops(condition, prefix, "metric"))
     # log 条件字段（type/messageContains/absent/sinceStep）均为可选组合，不做强校验。
     return errors
@@ -165,6 +239,9 @@ class ScenarioContext:
     sleep_fn: Callable[[float], None] = time.sleep
     now_fn: Callable[[], float] = time.monotonic
     screenshot_target_directory: str | None = None
+    job_wait_fn: Callable[[str, float, bool], dict[str, Any]] | None = None
+    event_sink: Callable[[str, dict[str, Any]], None] | None = None
+    profile_issue: str | None = field(default=None, init=False, repr=False)
 
 
 def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, Any]:
@@ -172,6 +249,7 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
     if errors:
         raise ScenarioValidationError(errors)
 
+    ctx.profile_issue = None
     defaults = scenario.get("defaults") or {}
     steps = scenario["steps"]
 
@@ -183,13 +261,25 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
     for index, step in enumerate(steps):
         action = step["action"]
 
+        metadata = {"stepIndex": index, "action": action, "id": step.get("id") or f"step-{index}"}
         if aborted:
             results.append(_skipped_result(index, step))
+            if ctx.event_sink is not None:
+                ctx.event_sink("step-finished", {**metadata, "status": "skipped"})
             continue
 
+        if ctx.event_sink is not None:
+            ctx.event_sink("step-started", {**metadata, "status": "running"})
         step_start_sequence = _current_log_sequence(ctx.session_path)
         step_start_sequence_by_index[index] = step_start_sequence
 
+        observed_frame = None
+        if ctx.event_sink is not None and action == "click" and ctx.capture_config.get("onScenarioStep", True):
+            # Capture before dispatch: clicks can replace or hide the target immediately.
+            observed_frame = _capture_screenshot(ctx, reason="scenario")
+            frame = frame_name(ctx.session_path, observed_frame)
+            if frame:
+                ctx.event_sink("step-frame", {**metadata, "status": "running", "frame": frame})
         start = ctx.now_fn()
         try:
             status, failure_type, evidence, extra = _execute_step(
@@ -232,11 +322,29 @@ def run_scenario(scenario: dict[str, Any], ctx: ScenarioContext) -> dict[str, An
 
         if status == "failed":
             if action == "assert" and ctx.capture_config.get("onAssertFailure", True):
-                screenshot_path = _capture_screenshot(ctx, reason="assert_failure")
-                if screenshot_path:
-                    step_result["evidence"] = {**(evidence or {}), "screenshotPath": screenshot_path}
+                screenshot = _capture_screenshot(ctx, reason="assert_failure")
+                if screenshot:
+                    step_result["evidence"] = {**(evidence or {}), "screenshotPath": screenshot["path"]}
             if not step.get("continueOnFailure", False):
                 aborted = True
+
+        if ctx.event_sink is not None:
+            safe_evidence = step_result["evidence"] or {}
+            event = {**metadata, "status": status, "durationMs": duration_ms}
+            if failure_type:
+                event["failureType"] = failure_type
+            for key in ("code", "clicked"):
+                if isinstance(safe_evidence.get(key), str):
+                    event[key] = safe_evidence[key]
+            frame = frame_name(ctx.session_path, safe_evidence)
+            if frame:
+                event["frame"] = frame
+            if action == "click" and status == "passed" and observed_frame:
+                marker = click_marker(safe_evidence.get("screenPoint"), observed_frame.get("referenceScreen"))
+                click_frame = frame_name(ctx.session_path, observed_frame)
+                if marker and click_frame:
+                    event.update(frame=click_frame, marker=marker)
+            ctx.event_sink("step-finished", event)
 
     _teardown(ctx, entered_play, defaults)
 
@@ -325,25 +433,84 @@ def _execute_step(
         )
         return _passthrough_result(response)
 
+    if action == "long-press":
+        return _run_gesture_job(
+            ctx,
+            step,
+            defaults,
+            route_path="interaction/long-press",
+            start_fn=lambda: ctx.client.interaction_long_press(
+                path=step["path"],
+                duration_seconds=float(step.get("durationSeconds", 0.5)),
+                force=step.get("force", False),
+                scene=step.get("scene"),
+            ),
+        )
+
+    if action == "drag":
+        return _run_gesture_job(
+            ctx,
+            step,
+            defaults,
+            route_path="interaction/drag",
+            start_fn=lambda: ctx.client.interaction_drag(
+                path=step["path"],
+                delta_x=float(step["deltaX"]),
+                delta_y=float(step["deltaY"]),
+                duration_seconds=float(step.get("durationSeconds", 0.3)),
+                steps=int(step.get("steps", 8)),
+                force=step.get("force", False),
+                scene=step.get("scene"),
+            ),
+        )
+
     if action == "invoke":
         response = ctx.client.gameplay_invoke(step["command"], step.get("args", {}))
         return _passthrough_result(response)
 
     if action == "profile-start":
+        ctx.profile_issue = "profile_not_stopped"
         response = ctx.client.profiling_start(target_directory=ctx.screenshot_target_directory)
         return _passthrough_result(response)
 
     if action == "profile-stop":
+        ctx.profile_issue = "profile_stop_failed"
         response = ctx.client.profiling_stop()
+        if response.get("ok") and response.get("code") == "not_profiling":
+            ctx.profile_issue = "not_profiling"
+            return "failed", "execution_error", {
+                **response, "ok": False,
+                "message": "没有本轮采样可停止，不能使用可能遗留的旧样本",
+            }, {}
+        if response.get("ok") and response.get("interrupted"):
+            ctx.profile_issue = "profile_interrupted"
+            return "failed", "execution_error", {
+                **response, "ok": False, "code": "profile_interrupted",
+                "message": "性能采样中断；已保存的部分样本不用于回归判定",
+            }, {}
+        if response.get("ok"):
+            ctx.profile_issue = None
         return _passthrough_result(response)
 
-    if action in {"screenshot", "snapshot"}:
+    if action in OBSERVATION_ACTIONS:
+        expected = step.get("expectedSize")
         if not ctx.capture_config.get("onScenarioStep", True):
+            if expected is not None:
+                return "failed", "execution_error", {
+                    "code": "scenario_capture_disabled", "message": "此步骤必须截图，但 onScenarioStep 已关闭",
+                }, {}
             return "passed", None, {"skipped": True, "reason": "capture.screenshot.onScenarioStep disabled"}, {}
-        path = _capture_screenshot(ctx, reason="scenario")
-        if path is None:
+        screenshot = _capture_screenshot(ctx, reason="scenario")
+        if screenshot is None:
             return "failed", "execution_error", {"message": "截图失败或超时"}, {}
-        return "passed", None, {"path": path}, {}
+        if expected is not None:
+            actual = {axis: screenshot.get(axis) for axis in ("width", "height")}
+            if not _valid_screenshot_size(actual) or actual != expected:
+                return "failed", "assertion_failed", {
+                    **screenshot, "code": "screenshot_size_mismatch", "expectedSize": expected,
+                    "message": "实际截图尺寸缺失或与 expectedSize 不一致",
+                }, {}
+        return "passed", None, screenshot, {}
 
     if action in CONDITION_ACTIONS:
         source, condition = _extract_source(step)
@@ -374,11 +541,85 @@ def _passthrough_result(response: dict[str, Any]) -> tuple[str, str | None, dict
     return "passed", None, response, {}
 
 
+def _run_gesture_job(
+    ctx: ScenarioContext,
+    step: dict[str, Any],
+    defaults: dict[str, Any],
+    route_path: str,
+    start_fn: Callable[[], dict[str, Any]],
+) -> tuple[str, str | None, dict[str, Any], dict[str, Any]]:
+    """启动 long-press/drag job 并轮询到终态；失败证据保留 events/blockedBy/起止坐标。"""
+    try:
+        require_bridge_route(ctx.client, "interaction", "POST", route_path)
+        start_response = start_fn()
+    except BridgeClientError as exc:
+        return "failed", "execution_error", {"code": exc.code, "message": str(exc)}, {}
+
+    if not start_response.get("ok", False):
+        return "failed", "execution_error", start_response, {}
+
+    job_id = start_response.get("jobId")
+    if not job_id:
+        # 同步完成（极少见）；把响应当作结果
+        return _passthrough_result(start_response)
+
+    if "timeoutSeconds" in step:
+        timeout = float(step["timeoutSeconds"]) * ctx.timeout_scale
+    else:
+        duration = float(step.get("durationSeconds", 0.5 if route_path.endswith("long-press") else 0.3))
+        timeout = max(DEFAULT_GESTURE_JOB_TIMEOUT_SECONDS, duration + 6.0) * ctx.timeout_scale
+    try:
+        job = _wait_scenario_job(ctx, job_id, timeout, raise_on_failure=False)
+    except JobTimeout as exc:
+        return (
+            "failed",
+            "timeout",
+            {"jobId": job_id, "message": str(exc), **((exc.last_job or {}).get("result") or {})},
+            {},
+        )
+    except BridgeClientError as exc:
+        return "failed", "execution_error", {"code": exc.code, "message": str(exc)}, {}
+    except JobFailed as exc:
+        job = exc.job
+
+    if job.get("status") == "succeeded":
+        result = job.get("result") or {}
+        return "passed", None, {"jobId": job_id, **result}, {}
+
+    evidence = {
+        "jobId": job_id,
+        "code": job.get("errorCode"),
+        "message": job.get("errorMessage"),
+        **(job.get("result") or {}),
+    }
+    return "failed", "execution_error", evidence, {}
+
+
 def _extract_source(step: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     for source in CONDITION_SOURCES:
         if source in step:
             return source, step[source]
     raise ValueError("assert/wait-for 步骤缺少 source（ui/log/gameplay/metric）")
+
+
+def _wait_scenario_job(
+    ctx: ScenarioContext,
+    job_id: str,
+    timeout_seconds: float,
+    *,
+    raise_on_failure: bool,
+) -> dict[str, Any]:
+    if ctx.job_wait_fn is not None:
+        return ctx.job_wait_fn(job_id, timeout_seconds, raise_on_failure)
+    return poll_job_with_client(
+        ctx.client,
+        job_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval=ctx.poll_interval,
+        raise_on_failure=raise_on_failure,
+        now_fn=ctx.now_fn,
+        sleep_fn=ctx.sleep_fn,
+    )
 
 
 def _step_timeout(step: dict[str, Any], defaults: dict[str, Any], ctx: ScenarioContext) -> float:
@@ -404,7 +645,7 @@ def _wait_for_status(ctx: ScenarioContext, predicate: Callable[[dict[str, Any]],
         ctx.sleep_fn(ctx.poll_interval)
 
 
-def _capture_screenshot(ctx: ScenarioContext, reason: str) -> str | None:
+def _capture_screenshot(ctx: ScenarioContext, reason: str) -> dict[str, Any] | None:
     try:
         start_response = ctx.client.capture_screenshot(reason=reason, target_directory=ctx.screenshot_target_directory)
     except BridgeClientError:
@@ -415,21 +656,24 @@ def _capture_screenshot(ctx: ScenarioContext, reason: str) -> str | None:
     if not job_id:
         return None
 
-    deadline = ctx.now_fn() + DEFAULT_SCREENSHOT_JOB_TIMEOUT_SECONDS * ctx.timeout_scale
-    while True:
-        try:
-            response = ctx.client.get_job(job_id)
-        except BridgeClientError:
-            return None
-        job = response.get("job", {})
-        status = job.get("status")
-        if status == "succeeded":
-            return (job.get("result") or {}).get("path")
-        if status == "failed":
-            return None
-        if ctx.now_fn() >= deadline:
-            return None
-        ctx.sleep_fn(ctx.poll_interval)
+    try:
+        job = poll_job_with_client(
+            ctx.client,
+            job_id,
+            timeout_seconds=DEFAULT_SCREENSHOT_JOB_TIMEOUT_SECONDS * ctx.timeout_scale,
+            poll_interval=ctx.poll_interval,
+            raise_on_failure=False,
+            now_fn=ctx.now_fn,
+            sleep_fn=ctx.sleep_fn,
+        )
+    except (BridgeClientError, JobFailed, JobTimeout):
+        return None
+    if job.get("status") != "succeeded":
+        return None
+    result = job.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get("path"), str) or not result["path"]:
+        return None
+    return {key: result[key] for key in ("path", "width", "height", "referenceScreen") if key in result}
 
 
 def evaluate_condition(
@@ -584,6 +828,11 @@ def _evaluate_metric_condition(ctx: ScenarioContext, condition: dict[str, Any]) 
     session 的 artifacts 目录）；文件不存在或该指标没有任何样本（可能计数器在本机/
     渲染管线下不可用）都判 metric_not_available，不静默当成 0。
     """
+    if ctx.profile_issue:
+        return False, {
+            "dataSource": "metrics.jsonl", "error": ctx.profile_issue,
+            "message": "本轮采样尚未成功停止；已有的样本不用于回归判定",
+        }
     metric_name = condition["name"]
     aggregate = condition.get("aggregate", "avg")
     metrics_path = ctx.session_path / "artifacts" / "metrics.jsonl"
@@ -598,13 +847,24 @@ def _evaluate_metric_condition(ctx: ScenarioContext, condition: dict[str, Any]) 
     values = [
         float(row[metric_name])
         for row in read_jsonl(metrics_path)
-        if isinstance(row.get(metric_name), (int, float))
+        if isinstance(row, dict) and _is_finite_number_in_range(
+            row.get(metric_name), inclusive_min=0,
+            exclusive_min=0 if metric_name == "frameTimeMs" else None,
+        )
     ]
     if not values:
         return False, {
             "dataSource": "metrics.jsonl",
             "error": "metric_not_available",
             "message": f"metrics.jsonl 中没有指标 '{metric_name}' 的样本（可能该计数器在本机/渲染管线下不可用）",
+        }
+
+    minimum = condition.get("minSamples", 1)
+    if len(values) < minimum:
+        return False, {
+            "dataSource": "metrics.jsonl", "error": "metric_insufficient_samples",
+            "metric": metric_name, "sampleCount": len(values), "minSamples": minimum,
+            "message": f"指标 '{metric_name}' 可用样本不足：{len(values)}/{minimum}",
         }
 
     actual = _aggregate_metric(values, aggregate)

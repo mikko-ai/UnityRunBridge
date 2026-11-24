@@ -1,0 +1,26 @@
+{
+  "name": "performance-baseline",
+  "description": "同一场景的无输入负载：预热至少 120 游戏帧，采样窗口至少 240 帧；阈值由自身基线校准",
+  "defaults": { "waitTimeoutSeconds": 45 },
+  "steps": [
+    { "action": "open-scene", "scene": "Assets/Scenes/Performance.unity" },
+    { "action": "play" },
+    { "action": "invoke", "command": "UnityRunBridge.Examples.PerformanceFrameProbe.Mark" },
+    { "action": "wait-for", "id": "warm-up", "gameplay": {
+      "command": "UnityRunBridge.Examples.PerformanceFrameProbe.FramesSinceMark", "atLeast": 120
+    } },
+    { "action": "profile-start" },
+    { "action": "invoke", "command": "UnityRunBridge.Examples.PerformanceFrameProbe.Mark" },
+    { "action": "wait-for", "id": "sample-window", "gameplay": {
+      "command": "UnityRunBridge.Examples.PerformanceFrameProbe.FramesSinceMark", "atLeast": 240
+    } },
+    { "action": "profile-stop" },
+    { "action": "assert", "id": "main-thread-p95", "metric": {
+      "name": "frameTimeMs", "aggregate": "p95", "minSamples": 180, "greaterThan": 0
+    } },
+    { "action": "assert", "id": "gc-alloc-p95", "metric": {
+      "name": "gcAllocBytes", "aggregate": "p95", "minSamples": 180, "atLeast": 0
+    } },
+    { "action": "stop" }
+  ]
+}

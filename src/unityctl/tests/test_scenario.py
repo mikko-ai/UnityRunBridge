@@ -49,12 +49,36 @@ class FakeClient:
         }
         self.interaction_input_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {"ok": True}
         self.interaction_set_value_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {"ok": True}
+        self.interaction_long_press_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {
+            "ok": True,
+            "jobId": "job-lp-1",
+        }
+        self.interaction_drag_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {
+            "ok": True,
+            "jobId": "job-drag-1",
+        }
         self.capture_screenshot_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {
             "ok": True,
             "jobId": "job-1",
         }
         self.get_job_handler: Callable[[str], dict[str, Any]] = lambda job_id: {
-            "job": {"status": "succeeded", "result": {"path": "/tmp/shot.png"}}
+            "job": {
+                "status": "succeeded",
+                "result": {
+                    "path": "/tmp/shot.png",
+                    "ok": True,
+                    "kind": "long-press",
+                    "events": ["pointerEnter", "pointerDown", "pointerUp", "pointerExit"],
+                },
+            }
+        }
+        self.get_capabilities_handler: Callable[[], dict[str, Any]] = lambda: {
+            "ok": True,
+            "capabilities": ["core", "interaction"],
+            "routes": [
+                {"method": "POST", "path": "interaction/long-press"},
+                {"method": "POST", "path": "interaction/drag"},
+            ],
         }
         self.open_scene_handler: Callable[[str], dict[str, Any]] = lambda scene: {"ok": True}
         self.profiling_start_handler: Callable[..., dict[str, Any]] = lambda **kwargs: {
@@ -96,6 +120,14 @@ class FakeClient:
         self.calls.append(("interaction_set_value", kwargs))
         return self.interaction_set_value_handler(**kwargs)
 
+    def interaction_long_press(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("interaction_long_press", kwargs))
+        return self.interaction_long_press_handler(**kwargs)
+
+    def interaction_drag(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("interaction_drag", kwargs))
+        return self.interaction_drag_handler(**kwargs)
+
     def gameplay_invoke(self, command: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         self.calls.append(("gameplay_invoke", (command, args)))
         return self.gameplay_invoke_handler(command, args or {})
@@ -115,6 +147,10 @@ class FakeClient:
     def get_job(self, job_id: str) -> dict[str, Any]:
         self.calls.append(("get_job", job_id))
         return self.get_job_handler(job_id)
+
+    def get_capabilities(self) -> dict[str, Any]:
+        self.calls.append(("get_capabilities", None))
+        return self.get_capabilities_handler()
 
     def profiling_start(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("profiling_start", kwargs))
@@ -149,6 +185,19 @@ def test_validate_scenario_requires_name_and_steps():
     assert any("steps" in e for e in errors)
 
 
+@pytest.mark.parametrize("value", ["bad", 0, -1, float("nan"), float("inf"), True])
+def test_validate_scenario_rejects_invalid_default_wait_timeout(value):
+    errors = validate_scenario(
+        {
+            "name": "x",
+            "defaults": {"waitTimeoutSeconds": value},
+            "steps": [{"action": "play"}],
+        }
+    )
+
+    assert any("defaults.waitTimeoutSeconds" in error for error in errors)
+
+
 def test_validate_scenario_rejects_unsupported_action():
     errors = validate_scenario({"name": "x", "steps": [{"action": "teleport"}]})
     assert len(errors) == 1
@@ -165,6 +214,45 @@ def test_validate_scenario_requires_path_for_click_input_set_value():
     for action in ("click", "input", "set-value"):
         errors = validate_scenario({"name": "x", "steps": [{"action": action}]})
         assert any("path" in e for e in errors), f"{action} should require path"
+
+
+def test_validate_scenario_requires_path_and_delta_for_gestures():
+    assert any("path" in e for e in validate_scenario({"name": "x", "steps": [{"action": "long-press"}]}))
+    assert any("path" in e for e in validate_scenario({"name": "x", "steps": [{"action": "drag"}]}))
+    errors = validate_scenario({"name": "x", "steps": [{"action": "drag", "path": "A/B"}]})
+    assert any("deltaX" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "step,field",
+    [
+        ({"action": "long-press", "path": "A/B", "durationSeconds": 0}, "durationSeconds"),
+        ({"action": "long-press", "path": "A/B", "durationSeconds": 3601}, "durationSeconds"),
+        (
+            {"action": "drag", "path": "A/B", "deltaX": float("inf"), "deltaY": 1},
+            "deltaX",
+        ),
+        (
+            {"action": "drag", "path": "A/B", "deltaX": 10**1000, "deltaY": 1},
+            "deltaX",
+        ),
+        ({"action": "drag", "path": "A/B", "deltaX": 1, "deltaY": 1, "steps": 1.9}, "steps"),
+        ({"action": "drag", "path": "A/B", "deltaX": 1, "deltaY": 1, "steps": 4097}, "steps"),
+        (
+            {
+                "action": "long-press",
+                "path": "A/B",
+                "durationSeconds": 1,
+                "timeoutSeconds": float("nan"),
+            },
+            "timeoutSeconds",
+        ),
+    ],
+)
+def test_validate_scenario_rejects_invalid_gesture_numeric_fields(step, field):
+    errors = validate_scenario({"name": "x", "steps": [step]})
+
+    assert any(field in error for error in errors)
 
 
 def test_validate_scenario_requires_text_for_input():
@@ -521,6 +609,171 @@ def test_run_scenario_all_pass(tmp_path):
     assert "_extra" not in result["steps"][0]
 
 
+def test_run_scenario_long_press_and_drag_wait_for_jobs(tmp_path):
+    client = FakeClient()
+    scenario = _base_scenario(
+        [
+            {"action": "long-press", "path": "A/Button", "durationSeconds": 0.2},
+            {"action": "drag", "path": "A/Handle", "deltaX": 10, "deltaY": -5, "steps": 3},
+        ]
+    )
+    ctx = make_ctx(tmp_path, client)
+    result = run_scenario(scenario, ctx)
+
+    assert result["status"] == "passed"
+    assert result["stepsPassed"] == 2
+    assert any(call[0] == "interaction_long_press" for call in client.calls)
+    assert any(call[0] == "interaction_drag" for call in client.calls)
+    assert any(call[0] == "get_job" for call in client.calls)
+
+
+def test_run_scenario_gesture_job_failure_keeps_evidence(tmp_path):
+    client = FakeClient()
+    client.interaction_long_press_handler = lambda **kwargs: {"ok": True, "jobId": "job-fail"}
+    client.get_job_handler = lambda job_id: {
+        "job": {
+            "status": "failed",
+            "errorCode": "occluded",
+            "errorMessage": "blocked",
+            "result": {
+                "events": ["pointerEnter"],
+                "blockedBy": "A/Overlay",
+                "start": {"x": 1, "y": 2},
+                "end": {"x": 1, "y": 2},
+                "durationSeconds": 0.2,
+            },
+        }
+    }
+    scenario = _base_scenario([{"action": "long-press", "path": "A/Button"}])
+    ctx = make_ctx(tmp_path, client)
+    result = run_scenario(scenario, ctx)
+
+    assert result["status"] == "failed"
+    evidence = result["steps"][0]["evidence"]
+    assert evidence["code"] == "occluded"
+    assert evidence["blockedBy"] == "A/Overlay"
+    assert evidence["events"] == ["pointerEnter"]
+
+
+def test_run_scenario_uses_injected_reload_aware_job_waiter(tmp_path):
+    client = FakeClient()
+    observed = {}
+
+    def wait_job(job_id, timeout_seconds, raise_on_failure):
+        observed.update(
+            {
+                "jobId": job_id,
+                "timeout": timeout_seconds,
+                "raiseOnFailure": raise_on_failure,
+            }
+        )
+        return {
+            "id": job_id,
+            "status": "failed",
+            "errorCode": "interrupted_by_reload",
+            "errorMessage": "job interrupted by editor domain reload",
+        }
+
+    scenario = _base_scenario([{"action": "long-press", "path": "A/Button"}])
+    ctx = make_ctx(tmp_path, client, job_wait_fn=wait_job)
+
+    result = run_scenario(scenario, ctx)
+
+    assert observed["jobId"] == "job-lp-1"
+    assert observed["raiseOnFailure"] is False
+    assert result["steps"][0]["evidence"]["jobId"] == "job-lp-1"
+    assert result["steps"][0]["evidence"]["code"] == "interrupted_by_reload"
+
+
+def test_run_scenario_gesture_job_timeout_keeps_job_id(tmp_path):
+    client = FakeClient()
+    client.get_job_handler = lambda job_id: {"job": {"id": job_id, "status": "running"}}
+    now = [0.0]
+    scenario = _base_scenario(
+        [{"action": "long-press", "path": "A/Button", "timeoutSeconds": 0.15}]
+    )
+    ctx = make_ctx(
+        tmp_path,
+        client,
+        now_fn=lambda: now[0],
+        sleep_fn=lambda seconds: now.__setitem__(0, now[0] + 0.1),
+        poll_interval=0.1,
+    )
+
+    result = run_scenario(scenario, ctx)
+
+    step = result["steps"][0]
+    assert step["status"] == "failed"
+    assert step["failureType"] == "timeout"
+    assert step["evidence"]["jobId"] == "job-lp-1"
+
+
+def test_run_scenario_gesture_default_timeout_covers_server_deadline(tmp_path):
+    client = FakeClient()
+    client.get_job_handler = lambda job_id: {"job": {"id": job_id, "status": "running"}}
+    now = [0.0]
+    scenario = _base_scenario(
+        [{"action": "long-press", "path": "A/Button", "durationSeconds": 30}]
+    )
+    ctx = make_ctx(
+        tmp_path,
+        client,
+        now_fn=lambda: now[0],
+        sleep_fn=lambda seconds: now.__setitem__(0, now[0] + 10.0),
+        poll_interval=10.0,
+    )
+
+    result = run_scenario(scenario, ctx)
+
+    assert result["steps"][0]["failureType"] == "timeout"
+    assert now[0] >= 36.0
+
+
+def test_run_scenario_gesture_explicit_timeout_is_not_extended(tmp_path):
+    client = FakeClient()
+    client.get_job_handler = lambda job_id: {"job": {"id": job_id, "status": "running"}}
+    now = [0.0]
+    scenario = _base_scenario(
+        [
+            {
+                "action": "long-press",
+                "path": "A/Button",
+                "durationSeconds": 30,
+                "timeoutSeconds": 2,
+            }
+        ]
+    )
+    ctx = make_ctx(
+        tmp_path,
+        client,
+        now_fn=lambda: now[0],
+        sleep_fn=lambda seconds: now.__setitem__(0, now[0] + 1.0),
+        poll_interval=1.0,
+    )
+
+    result = run_scenario(scenario, ctx)
+
+    assert result["steps"][0]["failureType"] == "timeout"
+    assert now[0] == 2.0
+
+
+def test_run_scenario_gesture_missing_route_returns_capability_error(tmp_path):
+    client = FakeClient()
+    client.get_capabilities_handler = lambda: {
+        "ok": True,
+        "capabilities": ["core", "interaction"],
+        "routes": [{"method": "POST", "path": "interaction/click"}],
+    }
+    scenario = _base_scenario([{"action": "drag", "path": "A/Handle", "deltaX": 10, "deltaY": 5}])
+
+    result = run_scenario(scenario, make_ctx(tmp_path, client))
+
+    step = result["steps"][0]
+    assert step["status"] == "failed"
+    assert step["evidence"]["code"] == "bridge_capability_missing"
+    assert not any(call[0] == "interaction_drag" for call in client.calls)
+
+
 def test_run_scenario_assertion_failure_skips_subsequent_steps_by_default(tmp_path):
     client = FakeClient()
     client.hierarchy_inspect_handler = lambda **params: {
@@ -780,3 +1033,177 @@ def test_convert_recording_to_scenario_accepts_custom_name(tmp_path):
     scenario = convert_recording_to_scenario(actions_path, name="custom-name")
 
     assert scenario["name"] == "custom-name"
+
+
+@pytest.mark.parametrize("min_samples", [0, -1, 2.5, True, "5"])
+def test_metric_min_samples_rejects_invalid_count(min_samples):
+    scenario = _base_scenario([{"action": "assert", "metric": {
+        "name": "frameTimeMs", "minSamples": min_samples, "atMost": 20,
+    }}])
+    assert any("minSamples" in message for message in validate_scenario(scenario))
+
+
+def test_metric_min_samples_never_uses_nan_or_boolean_as_measurement(tmp_path):
+    client = FakeClient()
+    ctx = make_ctx(tmp_path, client)
+    path = ctx.session_path / "artifacts" / "metrics.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(path, [{"frameTimeMs": v} for v in (9.0, 10.0, True, float("nan"), float("inf"))])
+    scenario = _base_scenario([{"action": "assert", "metric": {
+        "name": "frameTimeMs", "aggregate": "p95", "minSamples": 3, "atMost": 20,
+    }}])
+    check = run_scenario(scenario, ctx)["steps"][0]
+    assert check["status"] == "failed"
+    assert check["evidence"]["error"] == "metric_insufficient_samples"
+    assert check["evidence"]["sampleCount"] == 2
+
+
+def test_interrupted_profile_cannot_pass_using_partial_samples(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "interrupted": True, "frameCount": 120}
+    scenario = _base_scenario([
+        {"action": "profile-start"},
+        {"action": "profile-stop"},
+        {"action": "assert", "metric": {"name": "frameTimeMs", "atMost": 20}},
+    ])
+    steps = run_scenario(scenario, make_ctx(tmp_path, client))["steps"]
+    assert steps[1]["status"] == "failed"
+    assert steps[1]["evidence"]["code"] == "profile_interrupted"
+    assert steps[2]["status"] == "skipped"
+
+
+def test_performance_example_validates_and_keeps_two_calibration_gates():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    scenario = json.loads((root / "examples/verification/performance/baseline.json").read_text())
+    assert validate_scenario(scenario) == []
+    assert (root / "schemas/scenario.schema.json").read_bytes() == (
+        root / "src/unityctl/unityctl/schemas/scenario.schema.json"
+    ).read_bytes()
+    gates = [step["metric"] for step in scenario["steps"] if "metric" in step]
+    assert {gate["name"] for gate in gates} == {"frameTimeMs", "gcAllocBytes"}
+    assert all(gate["aggregate"] == "p95" and gate["minSamples"] == 180 for gate in gates)
+    assert next(gate for gate in gates if gate["name"] == "frameTimeMs")["greaterThan"] == 0
+    assert next(gate for gate in gates if gate["name"] == "gcAllocBytes")["atLeast"] == 0
+
+
+def test_profile_stop_after_external_stop_does_not_accept_artifact(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "code": "not_profiling", "frameCount": 0}
+    steps = run_scenario(_base_scenario([{"action": "profile-stop"}]), make_ctx(tmp_path, client))["steps"]
+    assert steps[0]["status"] == "failed"
+    assert steps[0]["evidence"]["code"] == "not_profiling"
+
+
+def test_zero_main_thread_time_is_not_usable_but_zero_gc_allocation_is(tmp_path):
+    ctx = make_ctx(tmp_path, FakeClient())
+    metrics = ctx.session_path / "artifacts" / "metrics.jsonl"
+    metrics.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(metrics, [{"frameTimeMs": 0, "gcAllocBytes": 0}])
+    steps = run_scenario(_base_scenario([
+        {"action": "assert", "continueOnFailure": True, "metric": {"name": "frameTimeMs", "atMost": 20}},
+        {"action": "assert", "metric": {"name": "gcAllocBytes", "atMost": 0}},
+    ]), ctx)["steps"]
+    assert steps[0]["status"] == "failed"
+    assert steps[0]["evidence"]["error"] == "metric_not_available"
+    assert steps[1]["status"] == "passed"
+
+
+def test_continuing_after_profile_failure_does_not_validate_partial_metric(tmp_path):
+    client = FakeClient()
+    client.profiling_stop_handler = lambda: {"ok": True, "interrupted": True, "frameCount": 100}
+    ctx = make_ctx(tmp_path, client)
+    metrics = ctx.session_path / "artifacts" / "metrics.jsonl"
+    metrics.parent.mkdir(parents=True, exist_ok=True)
+    write_jsonl(metrics, [{"frameTimeMs": 10}])
+    scenario = _base_scenario([
+        {"action": "profile-start"},
+        {"action": "profile-stop", "continueOnFailure": True},
+        {"action": "assert", "metric": {"name": "frameTimeMs", "atMost": 20}},
+    ])
+    check = run_scenario(scenario, ctx)["steps"][2]
+    assert check["status"] == "failed"
+    assert check["evidence"]["error"] == "profile_interrupted"
+
+
+def test_screenshot_expected_size_is_a_gate_not_an_optional_step(tmp_path):
+    step = {"action": "screenshot", "expectedSize": {"width": 720, "height": 1280}}
+    client = FakeClient()
+    ctx = make_ctx(tmp_path, client, capture_config={"onScenarioStep": False})
+    result = run_scenario(_base_scenario([step]), ctx)["steps"][0]
+    assert result["status"] == "failed"
+    assert result["evidence"]["code"] == "scenario_capture_disabled"
+
+
+@pytest.mark.parametrize("actual, status", [((720, 1280), "passed"), ((1280, 720), "failed"), ((None, None), "failed")])
+def test_screenshot_validates_job_dimensions(tmp_path, actual, status):
+    expected = {"width": 720, "height": 1280}
+    client = FakeClient()
+    client.get_job_handler = lambda _job_id: {
+        "job": {
+            "status": "succeeded", "result": {
+                "path": "/tmp/shot.png", "width": actual[0], "height": actual[1],
+            },
+        },
+    }
+    result = run_scenario(
+        _base_scenario([{"action": "snapshot", "expectedSize": expected}]), make_ctx(tmp_path, client)
+    )["steps"][0]
+    assert result["status"] == status
+    assert result["evidence"]["path"] == "/tmp/shot.png"
+    if status == "failed":
+        assert result["evidence"]["code"] == "screenshot_size_mismatch"
+        assert result["evidence"]["expectedSize"] == expected
+
+
+@pytest.mark.parametrize("size", [None, [], {}, {"width": True, "height": 1}, {"width": 0, "height": 1}])
+def test_screenshot_rejects_invalid_expected_size(size):
+    assert any("expectedSize" in error for error in validate_scenario(
+        _base_scenario([{"action": "screenshot", "expectedSize": size}])
+    ))
+
+
+def test_expected_size_is_only_supported_for_capture_steps():
+    assert validate_scenario(_base_scenario([{"action": "play", "expectedSize": {"width": 1, "height": 1}}]))
+
+
+@pytest.mark.parametrize("label, width, height", [("landscape", 1280, 720), ("portrait", 720, 1280)])
+def test_ui_example_wires_focus_assertions_and_required_screenshots(label, width, height):
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    example = root / "examples/verification/ui"
+    scenario = json.loads((example / f"{label}.json").read_text())
+    assert validate_scenario(scenario) == []
+    steps = {step["id"]: step for step in scenario["steps"] if "id" in step}
+    assert steps["viewport"]["gameplay"]["equals"] == f"{width}x{height}"
+    for test_id, target in (("default-focus", "confirm"), ("restored-focus", "launcher")):
+        assert steps[test_id]["gameplay"]["equals"] == target
+        assert steps[test_id]["gameplay"]["command"].endswith(".UiReviewDemo.FocusedControl")
+    for test_id in ("dialog-open", "dialog-closed"):
+        assert steps[test_id]["expectedSize"] == {"width": width, "height": height}
+
+
+def test_run_scenario_observes_start_before_bridge_action_and_preserves_failure(tmp_path):
+    client = FakeClient()
+    events = []
+
+    def fail_click(**_params):
+        assert events[-1][0] == "step-started" and events[-1][1]["status"] == "running"
+        return {"ok": False, "code": "occluded", "message": "private log detail"}
+
+    client.interaction_click_handler = fail_click
+    ctx = make_ctx(tmp_path, client, event_sink=lambda kind, row: events.append((kind, row)))
+    result = run_scenario(_base_scenario([
+        {"action": "click", "path": "A", "id": "blocked"},
+        {"action": "screenshot", "id": "not-run"},
+    ]), ctx)
+    assert result["status"] == "failed"
+    assert [(kind, row["status"]) for kind, row in events] == [
+        ("step-started", "running"), ("step-finished", "failed"), ("step-finished", "skipped"),
+    ]
+    assert events[1][1]["code"] == "occluded"
+    assert "message" not in events[1][1]

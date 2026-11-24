@@ -151,6 +151,11 @@ namespace Mk.UnityAgentBridge.Editor.Jobs
 
         internal static void CompleteFailed(string jobId, string errorCode, string errorMessage)
         {
+            CompleteFailed(jobId, errorCode, errorMessage, result: null);
+        }
+
+        internal static void CompleteFailed(string jobId, string errorCode, string errorMessage, object result)
+        {
             if (!Jobs.TryGetValue(jobId, out JobRecord record) || record.Status != JobStatus.Running)
             {
                 return;
@@ -159,6 +164,11 @@ namespace Mk.UnityAgentBridge.Editor.Jobs
             record.Status = JobStatus.Failed;
             record.ErrorCode = errorCode;
             record.ErrorMessage = errorMessage;
+            if (result != null)
+            {
+                record.Result = result;
+            }
+
             OnJobCompleted(jobId);
         }
 
@@ -388,6 +398,9 @@ namespace Mk.UnityAgentBridge.Editor.Jobs
         public void Succeed(object result) => JobManager.CompleteSucceeded(jobId, result);
 
         public void Fail(string errorCode, string errorMessage) => JobManager.CompleteFailed(jobId, errorCode, errorMessage);
+
+        public void Fail(string errorCode, string errorMessage, object result) =>
+            JobManager.CompleteFailed(jobId, errorCode, errorMessage, result);
     }
 
     public readonly struct JobStartResult

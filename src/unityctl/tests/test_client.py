@@ -3,7 +3,12 @@ from urllib.error import HTTPError
 
 import pytest
 
-from unityctl.client import BridgeClient, BridgeClientError, BridgeUnreachableError
+from unityctl.client import (
+    BridgeClient,
+    BridgeClientError,
+    BridgeUnreachableError,
+    require_bridge_route,
+)
 
 
 class FakeResponse:
@@ -226,6 +231,40 @@ def test_get_capabilities_reraises_other_errors(monkeypatch):
         client.get_capabilities()
 
     assert exc.value.code == "internal_error"
+
+
+def test_require_bridge_route_rejects_missing_capability():
+    class FakeClient:
+        def get_capabilities(self):
+            return {"capabilities": ["core"], "routes": []}
+
+    with pytest.raises(BridgeClientError) as exc:
+        require_bridge_route(FakeClient(), "interaction", "POST", "interaction/long-press")
+
+    assert exc.value.code == "bridge_capability_missing"
+
+
+def test_require_bridge_route_rejects_old_bridge_with_capability_but_without_route():
+    class FakeClient:
+        def get_capabilities(self):
+            return {
+                "capabilities": ["core", "interaction"],
+                "routes": [{"method": "POST", "path": "interaction/click"}],
+            }
+
+    with pytest.raises(BridgeClientError) as exc:
+        require_bridge_route(FakeClient(), "interaction", "POST", "interaction/drag")
+
+    assert exc.value.code == "bridge_capability_missing"
+    assert "interaction/drag" in str(exc.value)
+
+
+def test_require_bridge_route_allows_legacy_response_without_route_metadata():
+    class FakeClient:
+        def get_capabilities(self):
+            return {"capabilities": ["core", "interaction"]}
+
+    require_bridge_route(FakeClient(), "interaction", "POST", "interaction/drag")
 
 
 def test_get_job_requests_job_path(monkeypatch):
@@ -499,3 +538,63 @@ def test_refresh_posts_to_refresh_route(monkeypatch):
 
     assert result == {"ok": True, "code": "accepted"}
     assert calls == [("http://127.0.0.1:17890/refresh", "POST")]
+
+
+def test_capture_screenshot_annotate_flag(monkeypatch):
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(200, {"ok": True, "jobId": "job-1"})
+
+    monkeypatch.setattr("unityctl.client.urlopen", fake_urlopen)
+
+    client = BridgeClient("http://127.0.0.1:17890", token="secret-token")
+    client.capture_screenshot(annotate=True)
+    client.capture_screenshot()
+
+    assert captured[0] == {"annotate": True}
+    assert captured[1] == {}
+
+
+def test_capture_hit_test_posts_image_coords(monkeypatch):
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append((request.full_url, json.loads(request.data.decode("utf-8"))))
+        return FakeResponse(200, {"ok": True})
+
+    monkeypatch.setattr("unityctl.client.urlopen", fake_urlopen)
+
+    client = BridgeClient("http://127.0.0.1:17890", token="secret-token")
+    client.capture_hit_test(x=1, y=2, image_width=100, image_height=200)
+
+    assert captured == [
+        (
+            "http://127.0.0.1:17890/capture/hit-test",
+            {"x": 1, "y": 2, "imageWidth": 100, "imageHeight": 200},
+        )
+    ]
+
+
+def test_interaction_long_press_and_drag_post_payloads(monkeypatch):
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append((request.full_url, json.loads(request.data.decode("utf-8"))))
+        return FakeResponse(200, {"ok": True, "jobId": "job-g"})
+
+    monkeypatch.setattr("unityctl.client.urlopen", fake_urlopen)
+
+    client = BridgeClient("http://127.0.0.1:17890", token="secret-token")
+    client.interaction_long_press("A/B", duration_seconds=0.4, force=True, scene="Main")
+    client.interaction_drag("A/B", delta_x=10, delta_y=-5, steps=3)
+
+    assert captured[0] == (
+        "http://127.0.0.1:17890/interaction/long-press",
+        {"path": "A/B", "durationSeconds": 0.4, "force": True, "scene": "Main"},
+    )
+    assert captured[1][0] == "http://127.0.0.1:17890/interaction/drag"
+    assert captured[1][1]["deltaX"] == 10
+    assert captured[1][1]["deltaY"] == -5
+    assert captured[1][1]["steps"] == 3

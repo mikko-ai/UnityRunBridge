@@ -64,9 +64,9 @@ description: 在 <游戏名> 项目中定位、枚举、操作 UI 界面或判�
 
 ## 工具依赖
 
-执行本 skill 时必须同时读取官方 `.agents/skills/unityctl/SKILL.md`。
-使用 `hierarchy` 前读取其 `references/hierarchy.md`；
-执行 `click` / `input` / `set-value` / `snapshot` / `record` 前读取其 `references/interaction.md`。
+执行本 skill 时必须同时读取目标项目中的 .agents/skills/unityctl/SKILL.md。
+使用 `hierarchy` 前读取其 references/hierarchy.md；
+执行 `click` / `input` / `set-value` / `snapshot` / `record` 前读取其 references/interaction.md。
 参数、前置条件与错误处理以官方 skill / reference 为准；本文件只定义本项目的 UI 约定与验证过的查询。
 
 ## UI 根节点

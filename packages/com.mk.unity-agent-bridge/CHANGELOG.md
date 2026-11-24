@@ -4,6 +4,11 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [SemVer](https://semver.org/)。
 
+## [Unreleased]
+
+- UGUI 支持从截图像素点击（`POST /interaction/click-at`）；只处理顶层命中，不穿透遮挡。
+- 普通截图结果增加 `coordinateSpace`、`referenceScreen`，截图结果额外报告项目的 `agentImageAccess` 配置。
+
 ## [0.3.0] - 2026-07-13
 
 ### 模块化重构（破坏性：内部程序集边界）
