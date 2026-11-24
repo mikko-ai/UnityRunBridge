@@ -3,7 +3,7 @@
 const get = (id) => document.getElementById(id);
 const labels = {
   running: "运行中", passed: "已通过", failed: "失败", skipped: "已跳过",
-  interrupted: "已中断", waiting: "等待任务", unknown: "状态未知",
+  interrupted: "已中断", unverified: "未断言", waiting: "等待任务", unknown: "状态未知",
 };
 const editorState = {
   idle: "空闲", compiling: "编译中", updating: "更新中", enteringPlay: "进入 Play Mode",
@@ -12,7 +12,7 @@ const editorState = {
 const actionNames = {
   "open-scene": "打开场景", play: "进入 Play Mode", stop: "退出 Play Mode",
   "wait-for": "等待条件", assert: "断言", click: "点击", screenshot: "截图",
-  snapshot: "截图", input: "输入", "set-value": "设置控件值", invoke: "调用探针",
+  snapshot: "截图", "click-at": "按画面点击", gameplay: "读取 Unity 探针", input: "输入", "set-value": "设置控件值", invoke: "调用探针",
 };
 let currentSession = null;
 let chosenStep = null;
@@ -73,11 +73,20 @@ function updateRows() {
         renderFrame();
       });
       const status = document.createElement("span");
-      li.append(index, caption, button, status);
+      const details = document.createElement("details");
+      details.className = "step-detail";
+      details.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = "操作详情";
+      const why = document.createElement("p");
+      const command = document.createElement("code");
+      const result = document.createElement("p");
+      details.append(summary, why, command, result);
+      li.append(index, caption, button, status, details);
       list.append(li);
-      rows.set(step.stepIndex, {caption, button, status});
+      rows.set(step.stepIndex, {caption, button, status, details, why, command, result});
     }
-    const {caption, button, status} = rows.get(step.stepIndex);
+    const {caption, button, status, details, why, command, result} = rows.get(step.stepIndex);
     const label = `${actionNames[step.action] || step.action} · ${step.id}${step.code ? ` · ${step.code}` : ""}`;
     writeText(caption, label);
     writeText(button, label);
@@ -85,6 +94,16 @@ function updateRows() {
     button.hidden = !step.frame;
     writeText(status, labels[step.status] || "状态未知");
     status.dataset.status = step.status;
+    details.hidden = !step.why;
+    if (step.why) {
+      writeText(why, `目的：${step.why}`);
+      writeText(command, step.command || "");
+      const v = step.verification;
+      const actual = v && (v.found ? JSON.stringify(v.actual) ?? "非标量" : "未返回");
+      writeText(result, v
+        ? `验证：${v.field}，预期 ${JSON.stringify(v.expected)}，实际 ${actual}（${v.passed ? "通过" : "失败"}）`
+        : step.clicked ? `实际命中：${step.clicked}` : step.code ? `命令结果：${step.code}` : "等待命令返回");
+    }
   }
   if (chosenStep === null && followScroll) list.scrollTop = list.scrollHeight;
   get("timeline-empty").hidden = stepRows.length > 0;
@@ -110,7 +129,7 @@ function receive(state) {
     stepRows = [...byStep.values()];
     const start = state.events.find((event) => event.type === "run-started");
     writeText(get("run-name"), start?.name || "尚无监看会话");
-    writeText(get("step-count"), start ? `${stepRows.length} / ${start.stepsTotal}` : "");
+    writeText(get("step-count"), start ? Number.isInteger(start.stepsTotal) ? `${stepRows.length} / ${start.stepsTotal}` : `${stepRows.length} 步` : "");
     updateRows();
     renderFrame();
   }

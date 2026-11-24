@@ -87,6 +87,13 @@ def _run_status(events: list[dict]) -> str:
         return "waiting"
     if events[-1].get("type") == "run-finished":
         return events[-1].get("status", "unknown")
+    if events[0].get("kind") == "agent":
+        pending = events[-1]
+        if pending.get("type") == "step-started":
+            owner = pending.get("stepPid")
+            if type(owner) is int and owner > 0 and not is_pid_alive(owner):
+                return "interrupted"
+        return "running"
     pid = events[0].get("runnerPid")
     if type(pid) is int and pid > 0:
         return "running" if is_pid_alive(pid) else "interrupted"

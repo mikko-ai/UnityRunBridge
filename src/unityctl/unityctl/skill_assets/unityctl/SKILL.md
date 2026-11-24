@@ -1,6 +1,6 @@
 ---
 name: unityctl
-description: 用 unityctl CLI 验证 Unity 项目。适用于启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
+description: 用 unityctl CLI 验证 Unity 项目。适用于启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
 x-unityctl-version: __UNITYCTL_VERSION__
 ---
 
@@ -64,6 +64,7 @@ unityctl config validate    # 确认配置无误后再 start
 | UI 操作、截图、动作录制（UI/录制需 UGUI） | `click` / `click-at` / `input` / `set-value` / `snapshot` / `record` | `references/interaction.md` |
 | 零侵入调用游戏逻辑 | `gameplay` | `references/gameplay.md` |
 | 可复跑验证脚本 | `scenario` | `references/scenario.md` |
+| 本机实时监看 Scenario 或 Agent 操作、回看截图、查询运行记录 | `watch` / `agent-run` / `scenario run --observe` / `runs list` / `runs show` | `references/observation.md` |
 | 性能采样 / Player 构建 / 构建大小 / 健康检查 | `profile` / `build` / `build-size` / `health` | `references/profiling-build-health.md` |
 
 项目专属知识（界面约定等）不在本 skill 中：查看项目 `.agents/skills/` 下的其他 skill；如何编写见仓库 README「为你的项目编写自定义 skill」一节。

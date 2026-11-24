@@ -145,7 +145,7 @@ uv run unityctl --help
 | `profile start` / `profile status` / `profile stop` | `ProfilerRecorder` 逐帧性能采样 |
 | `scenario validate` / `scenario run` / `scenario from-recording` | 可复跑的自动化验证脚本引擎 |
 | [`runs list` / `runs show`](docs/unityctl-runs.md) | 在同一入口查看 Scenario、UTF、Midscene 的失败、截图和日志 |
-| [`watch`](docs/unityctl-watch.md) | 本地中文监看：跟随启用 `--observe` 的 Scenario、截图与点击落点 |
+| [`watch` / `agent-run`](docs/unityctl-watch.md) | 本地中文监看：跟随 Scenario 或 Agent 的实际操作，查看理由、命令、截图、点击落点和断言 |
 | [`test run` / `test status`](docs/unityctl-utf.md) | 在独立 Unity 进程运行 UTF EditMode / PlayMode，查询结构化结果 |
 | `build` | 独立进程执行 Player 构建并生成 `build-report.json` |
 | `build-size` | 离线分析构建大小、交付预算和资源导入线索 |

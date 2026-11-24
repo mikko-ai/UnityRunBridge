@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from unityctl import __version__
+from unityctl import __version__, agent_run
 from unityctl.utf import UtfError, read_test_job, run_tests
 from unityctl.build import BuildError, run_build
 from unityctl.build_size import analyze_build_size
@@ -1019,6 +1019,8 @@ def build_parser() -> argparse.ArgumentParser:
     runs_show = run_records.add_parser("show", help="查看失败步骤、截图及日志文件")
     runs_show.add_argument("key", metavar="KIND:ID")
 
+    agent_run.add_parser(subparsers)
+
     scenario_validate = scenario_subparsers.add_parser(
         "validate",
         help="只做字段/结构校验，不连接 Bridge、不创建 session",
@@ -1134,6 +1136,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "build": cmd_build,
         "test": cmd_test,
         "watch": cmd_watch,
+        "agent-run": cmd_agent_run,
         "runs": cmd_runs,
         "build-size": cmd_build_size,
         "health": cmd_health,
@@ -2228,6 +2231,16 @@ def cmd_runs(args: argparse.Namespace) -> dict[str, Any]:
         return {"ok": True, "record": show_run(project, args.key)}
     except RunRecordError as exc:
         raise CliError("run_record_unavailable", str(exc)) from exc
+
+
+def cmd_agent_run(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.global_project_path or Path.cwd())
+    try:
+        return agent_run.run_agent(project, args, build_parser().parse_args, dispatch, lambda exc: {
+            "ok": False, "code": _error_code(exc), "message": str(exc),
+        })
+    except (agent_run.AgentRunError, OSError) as exc:
+        raise CliError("agent_run_unavailable", str(exc)) from exc
 
 
 def cmd_watch(args: argparse.Namespace) -> dict[str, Any]:

@@ -45,3 +45,8 @@ footer { margin-block-start: 16px; }
   .workspace { grid-template-columns: minmax(0, 1fr); }
   .steps { max-block-size: none; }
 }
+
+.step-detail { grid-column: 2 / -1; min-width: 0; overflow-wrap: anywhere; }
+.step-detail summary { cursor: pointer; color: var(--blue); }
+.step-detail code { display: block; margin-block: 5px; background: var(--bg); padding: 5px 8px; }
+.step-detail p { margin-block: 5px; }
