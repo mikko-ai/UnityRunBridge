@@ -94,7 +94,6 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                 position["height"] = referenceHeight;
                 response["screenPoint"] = position;
             }
-            return response;
             return AuditAndReturn("click", request, scene, response, stopwatch);
         }
 
