@@ -1819,7 +1819,9 @@ def cmd_ui_index(args: argparse.Namespace) -> dict[str, Any]:
         job_id = reply.get("jobId")
         if not isinstance(job_id, str) or not ui_index.JOB_ID.fullmatch(job_id):
             raise CliError("ui_index_scan_invalid", "Bridge 返回无效的扫描任务 ID")
-        job = wait_for_job(project, job_id, timeout_seconds=args.timeout, initial_info=info)
+        # Small incremental scans often finish in one editor tick. Do not impose
+        # the generic 500 ms sampling interval on every successful quick sync.
+        job = wait_for_job(project, job_id, timeout_seconds=args.timeout, poll_interval=0.1, initial_info=info)
         return ui_index.import_snapshot(project, root, revision, known, job_id, job.get("result"))
     except ui_index.UiIndexError as exc:
         raise CliError(exc.code, str(exc)) from exc

@@ -404,7 +404,7 @@ def run_ui_index(base, unity, upm=None, expected_legacy=False):
     print(f"UI index: cold/warm/full, offline alias and read-only asset files verified ({project})", flush=True)
 
 
-def run_indexed_click(base, unity, upm=None):
+def run_indexed_click(base, unity, upm=None, *, layout=(640, 360), benchmark=False):
     project = project_at(base, "ui-index-click", {
         "com.mk.unity-agent-bridge": f"file:{upm or BRIDGE}", "com.unity.ugui": "1.0.0",
     })
@@ -414,7 +414,9 @@ def run_indexed_click(base, unity, upm=None):
         shutil.copyfile(FIXTURES / name, project / "Assets/Editor" / name)
     shutil.copyfile(FIXTURES / "UiIndexFixtureProbe.cs", project / "Assets/UiIndexFixtureProbe.cs")
     shutil.copyfile(ROOT / "examples/verification/ui/UiReviewDemo.cs", project / "Assets/UiReviewDemo.cs")
-    (project / "game-view-size.txt").write_text("640x360")
+    width, height = layout
+    dimensions = f"{width}x{height}"
+    (project / "game-view-size.txt").write_text(dimensions)
     probe_name = "UiIndexFixtureProbe.Control"
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -427,7 +429,7 @@ def run_indexed_click(base, unity, upm=None):
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     scene = "Assets/Scenes/Indexed.unity"
     try:
-        wait_for_editor(project, editor, "indexed-click 640x360")
+        wait_for_editor(project, editor, f"indexed-click {dimensions}")
         checked = cli(project, "ui-index", "sync", "--root", "Assets/Menu")
         assert checked["prefabs"] == 1 and checked["controlsScanned"] == 2, checked
         both = cli(project, "ui-index", "find", "--root", "Assets/Menu", "Action")
@@ -447,6 +449,11 @@ def run_indexed_click(base, unity, upm=None):
         def probe(action):
             return cli(project, "gameplay", "invoke", probe_name,
                        "--args", json.dumps({"action": action}))["result"]
+        if benchmark:
+            try:
+                return benchmark_indexed(project, layout, probe, target_args, scope)
+            finally:
+                cli(project, "stop", "--latest")
         def attempt(args, code="ok"):
             result = cli(project, "ui-index", "click", *args, expected=code)
             expected.append(code)
@@ -517,6 +524,158 @@ def run_indexed_click(base, unity, upm=None):
         write_json(project / "indexed-click-result.json", {"methods": expected, "responses": responses, "audits": audits,
                                                           "expectedCallbacks": 2, "unexpectedCallbacks": 0})
         print(f"Indexed click: {len(expected)} attempts; 2 intended callbacks, 0 unexpected ({project})", flush=True)
+    finally:
+        terminate(editor)
+
+
+def benchmark_indexed(project, layout, probe, target_args, scope):
+    """Measure the same target/callback with each strategy on the same Editor."""
+    width, height = layout
+    expected = "UiCanvas/Panel/Action[0]"
+    refused = ("ok", "no_click_handler", "occluded", "not_interactable", "game_view_resized",
+               "ui_index_offscreen", "ui_index_handler_mismatch")
+    strategies = ("image", "hierarchy", "known-path", "indexed")
+    passed = dict.fromkeys(strategies, 0)
+    attempts = dict.fromkeys(strategies, 0)
+    samples = []
+    total_clicks = 0
+    assert probe("counts") == "0:0"
+
+    def execute(strategy):
+        nonlocal total_clicks
+        metrics = []
+        artifact_bytes = 0
+        if strategy == "image":
+            frame = cli(project, "snapshot", "--max-long-edge", 640, metrics=metrics)
+            reference = frame["referenceScreen"]
+            assert (reference["width"], reference["height"]) == layout, frame
+            x = (width / 2 - 80) * frame["width"] / width
+            y = frame["height"] / 2
+            artifact_bytes = Path(frame["path"]).stat().st_size
+            observed = cli(project, "hit-test", "--x", x, "--y", y, "--image-width", frame["width"],
+                           "--image-height", frame["height"], metrics=metrics)["ugui"]["hits"]
+            if not observed or observed[0]["path"] != expected:
+                result = {"ok": False, "code": "unexpected_hit"}
+            else:
+                result = click(project, frame, x, y, expected=refused, metrics=metrics)
+        elif strategy == "hierarchy":
+            found = cli(project, "hierarchy", "find", "--name", "Action", "--under", "UiCanvas/Panel",
+                        "--component", "Button", "--active-only", metrics=metrics)
+            selected, = [item for item in found["nodes"] if item["path"] == expected]
+            result = cli(project, "click", selected["path"], expected=refused, metrics=metrics)
+        elif strategy == "known-path":
+            result = cli(project, "click", expected, expected=refused, metrics=metrics)
+        else:
+            result = cli(project, "ui-index", "click", *target_args, *scope, expected=refused, metrics=metrics)
+        if result["ok"]:
+            assert result["clicked"] == expected, (strategy, result)
+            total_clicks += 1
+        assert probe("counts") == f"{total_clicks}:0", (strategy, result)
+        return {"strategy": strategy, "ok": result["ok"], "code": result.get("code", "ok"),
+                "commands": metrics, "cliMillis": sum(row["millis"] for row in metrics),
+                "calls": len(metrics), "responseBytes": sum(row["responseBytes"] for row in metrics),
+                "artifactBytes": artifact_bytes}
+
+    warmups = [execute(strategy) for strategy in strategies]
+    for index in range(40):
+        order = strategies[index % len(strategies):] + strategies[:index % len(strategies)]
+        for strategy in order:
+            if passed[strategy] >= 20:
+                continue
+            item = execute(strategy)
+            samples.append(item)
+            attempts[strategy] += 1
+            passed[strategy] += item["ok"]
+        if all(value >= 20 for value in passed.values()):
+            break
+
+    summary = {}
+    for strategy in strategies:
+        successful = [row for row in samples if row["strategy"] == strategy and row["ok"]]
+        times = sorted(row["cliMillis"] for row in successful)
+        n = len(times)
+        summary[strategy] = {
+            "n": n, "attempts": attempts[strategy], "failed": attempts[strategy] - n,
+            "p50Millis": (times[(n - 1) // 2] + times[n // 2]) / 2 if n else None,
+            "p95Millis": times[math.ceil(.95 * n) - 1] if n else None,
+            "callsPerSuccess": successful[0]["calls"] if n else None,
+        }
+    report = {"layout": layout, "warmups": warmups, "samples": samples, "summary": summary,
+              "expectedCallbacks": total_clicks, "unexpectedCallbacks": 0}
+    write_json(project / "indexed-perf.json", report)
+    print(f"{width}x{height} indexed comparison: {json.dumps(summary)}", flush=True)
+    return all(value >= 20 for value in passed.values())
+
+
+def run_index_scale(base, unity, upm=None):
+    project = project_at(base, "ui-index-scale", {
+        "com.mk.unity-agent-bridge": f"file:{upm or BRIDGE}", "com.unity.ugui": "1.0.0",
+    })
+    folder = project / "Assets/Editor"
+    folder.mkdir()
+    shutil.copyfile(FIXTURES / "PrepareUiIndexScale.cs", folder / "PrepareUiIndexScale.cs")
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        write_json(project / ".unity-agent/config.json", {"version": 1, "bridge": {"preferredPort": sock.getsockname()[1]}})
+    editor = subprocess.Popen([str(unity), "-batchmode", "-nographics", "-projectPath", str(project),
+                               "-logFile", str(project / "editor.log"), "-executeMethod", "PrepareUiIndexScale.Setup"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    rows = []
+    try:
+        wait_for_editor(project, editor, "indexed scale fixture")
+        if upm:
+            lock = json.loads((project / "Packages/packages-lock.json").read_text())
+            assert lock["dependencies"]["com.mk.unity-agent-bridge"]["source"] == "local-tarball"
+        response = project / "ui-index-scale-reply.txt"
+
+        def mutate(size, name):
+            request = project / "ui-index-scale-request.txt"
+            staging = request.with_suffix(".pending")
+            staging.write_text(f"{size}:{name}")
+            staging.replace(request)
+            until = time.monotonic() + 60
+            while time.monotonic() < until:
+                if editor.poll() is not None:
+                    raise RuntimeError("scale fixture exited during mutation")
+                if response.is_file():
+                    state = response.read_text()
+                    response.unlink()
+                    assert state == "ok", state
+                    return
+                time.sleep(0.1)
+            raise TimeoutError("fixture mutation did not finish")
+
+        for size in (10, 100, 1000):
+            root = f"Assets/Bench{size}"
+            for stage, change, count in (("cold", None, size), ("warm", None, 0),
+                                         ("single", "Loose", 1), ("dependency", "Base", 2)):
+                if change:
+                    mutate(size, change)
+                metrics = []
+                result = cli(project, "ui-index", "sync", "--root", root, "--timeout", 120,
+                             metrics=metrics, timeout=150)
+                assert result["scanned"] == count and result["unchanged"] == size - count, result
+                assert result["controlsScanned"] == count and result["prefabs"] == size, result
+                rows.append({"size": size, "stage": stage, "sync": result, "client": metrics[0]})
+
+            timings = []
+            for _ in range(10):
+                cli_metrics = []
+                found = cli(project, "ui-index", "find", "--root", root, "Bench", "--type", "Button",
+                            "--limit", 1, metrics=cli_metrics)
+                assert found["controls"] and found["ambiguous"] and not found["liveVerified"], found
+                timings.extend(cli_metrics)
+            target = found["controls"][0]["id"]
+            exact = []
+            for _ in range(10):
+                cli_metrics = []
+                pair = cli(project, "ui-index", "find", "--root", root, "--id", target, metrics=cli_metrics)
+                assert len(pair["controls"]) == 1 and not pair["ambiguous"], pair
+                exact.extend(cli_metrics)
+            rows.append({"size": size, "stage": "find-contains", "clientSamples": timings})
+            rows.append({"size": size, "stage": "find-id", "clientSamples": exact})
+        write_json(project / "ui-index-scale.json", rows)
+        print(f"Indexed scale: {len(rows)} cases recorded ({project})", flush=True)
     finally:
         terminate(editor)
 
@@ -702,7 +861,7 @@ def verify_run_index(work, unity, upm=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "ui-index", "indexed-click", "indexed-legacy", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "ui-index", "indexed-click", "indexed-legacy", "indexed-perf", "indexed-scale", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
     parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，供分发和索引实测使用")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
@@ -726,7 +885,7 @@ def main():
         parser.error("delivery requires --upm pointing to a local .tgz")
     if args.suite == "indexed-legacy" and not args.upm:
         parser.error("indexed-legacy requires a local 0.4.x UPM tarball")
-    if args.suite in {"ui-index", "indexed-click", "indexed-legacy"} and args.upm and (args.upm.suffix != ".tgz" or not args.upm.is_file()):
+    if args.suite in {"ui-index", "indexed-click", "indexed-legacy", "indexed-perf", "indexed-scale"} and args.upm and (args.upm.suffix != ".tgz" or not args.upm.is_file()):
         parser.error("ui-index requires --upm pointing to a local .tgz")
     unity = args.unity
     if unity and unity.suffix == ".app":
@@ -754,6 +913,15 @@ def main():
                      expected_legacy=args.suite == "indexed-legacy")
     if args.suite == "indexed-click":
         run_indexed_click(work, unity.resolve(), args.upm.resolve() if args.upm else None)
+    if args.suite == "indexed-perf":
+        accepted = []
+        for width, height in ((640, 360), (360, 640)):
+            accepted.append(run_indexed_click(work / f"{width}x{height}", unity.resolve(),
+                                              args.upm.resolve() if args.upm else None,
+                                              layout=(width, height), benchmark=True))
+        assert all(accepted), "too few successful samples; see both layout reports"
+    if args.suite == "indexed-scale":
+        run_index_scale(work, unity.resolve(), args.upm.resolve() if args.upm else None)
     if args.suite == "records":
         verify_run_index(work, unity.resolve())
     if args.suite == "delivery":

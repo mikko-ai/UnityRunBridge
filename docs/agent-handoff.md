@@ -7,6 +7,7 @@
 - 服务对象是需要开发和测试 Unity 项目的 Agent：从 `unityctl` 和内置 Skill 进入，经本地 HTTP Bridge 操作 Unity Editor。**只以 Unity 2022.3 为验收范围，实测版本为 2022.3.62f2。** 历史调研里的 Unity 2023 不代表支持承诺。
 - 旧工程先用 `unityctl doctor` 对照 CLI、UPM 声明和运行态 Bridge，再按任务加 `--require-capability` / `--require-route`。版本不同只提示；能力缺失时按 `repairGuidance` 排查，项目依赖变更需要人工确认。见 [旧工程升级诊断](../README.md#旧工程升级诊断)。
 - 确定性验证优先用 UTF（EditMode / PlayMode）或 Scenario。当前 Agent 可直接读取 Game View PNG、选择坐标并通过 `agent-run` 记录操作。只读的本地中文 `watch` 显示主动提供的操作理由、命令、点击落点和断言，不显示内部推理；画面是按步骤更新的截图，不是视频。
+- 0.6.0 分支新增 [UI 索引](unityctl-ui-index.md)：静态 Prefab 同步、SQLite 离线发现与独立用途注释；已保存实例在 Edit Mode 绑定，在 Play Mode 才核验和非强制点击。UGUI 之外仍依赖当前 Hierarchy/截图，不自动改用旧点击。
 - `watch` 不调用模型，不需要 Midscene。Midscene 是独立可选适配器；其自主视觉判断才需要模型。不要默认发送截图、开启 Gameplay 权限或暴露回环端口。Agent、Scenario、UTF、Midscene 四类历史记录统一通过 `unityctl runs list/show` 查询；并非四类都能实时监看。
 - 普通 GitHub CI 只跑 Python、无模型 Midscene 适配器和 UPM 包校验，不运行 Unity，不恢复自托管 Mac Runner。Unity 实机回归在本机。Release 是独立的标签发布流程；未获授权，不创建或推送标签、不发布。
 
@@ -19,6 +20,7 @@
 | Game View 截图、点击及审计 | [CaptureController.cs](../packages/com.mk.unity-agent-bridge/Editor/Features/Capture/CaptureController.cs)、[InteractionController.cs](../packages/com.mk.unity-agent-bridge/Editor/Features/Interaction/InteractionController.cs)。改点击返回路径时同时验证点击响应、回调和审计写入；不要用一个提前返回绕过审计。 |
 | Scenario、UTF 和记录索引 | [scenario.py](../src/unityctl/unityctl/scenario.py)、[utf.py](../src/unityctl/unityctl/utf.py)、[run_records.py](../src/unityctl/unityctl/run_records.py) |
 | Agent 会话、事件流和监看界面 | [agent_run.py](../src/unityctl/unityctl/agent_run.py)、[run_events.py](../src/unityctl/unityctl/run_events.py)、[watch.py](../src/unityctl/unityctl/watch.py)、[watch_assets](../src/unityctl/unityctl/watch_assets) |
+| UI 索引与运行态绑定 | [ui_index.py](../src/unityctl/unityctl/ui_index.py)、[UiIndexScan.cs](../packages/com.mk.unity-agent-bridge/Editor/Features/UiIndexScan.cs)、[UiIndexRuntime.cs](../packages/com.mk.unity-agent-bridge/Editor/Features/UiIndexRuntime.cs) |
 | Skill、Midscene 适配器和测试 | [内置 Skill](../src/unityctl/unityctl/skill_assets/unityctl/SKILL.md)、[Midscene 示例](../examples/midscene-game-view/README.md)、[Python 测试](../src/unityctl/tests)、[Unity 测试](../packages/com.mk.unity-agent-bridge/Tests) |
 
 功能细节见 [watch](unityctl-watch.md)、[运行记录](unityctl-runs.md)、[UTF](unityctl-utf.md)；架构背景见 [项目笔记](project-notes.md)；[旧实施计划](superpowers/plans) 只用于回查。

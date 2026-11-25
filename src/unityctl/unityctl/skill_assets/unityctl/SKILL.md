@@ -1,6 +1,6 @@
 ---
 name: unityctl
-description: 用 unityctl CLI 验证 Unity 项目。适用于旧工程 Bridge 版本与能力诊断、启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、通过测试逐步积累玩法经验、记录卡点、询问待确认问题与吸收用户纠正、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
+description: 用 unityctl CLI 验证 Unity 项目。适用于旧工程 Bridge 版本与能力诊断、启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、UGUI Prefab 增量索引与安全定位点击、实时监看、运行记录查询、通过测试逐步积累玩法经验、记录卡点、询问待确认问题与吸收用户纠正、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
 x-unityctl-version: __UNITYCTL_VERSION__
 ---
 
@@ -82,6 +82,7 @@ unityctl doctor --require-capability interaction --require-route POST interactio
 | 日志查询与排错、log-rules 降噪/聚焦 | `logs` / `errors` | `references/logs.md` |
 | 场景 Hierarchy 结构化查询（只读；Core，不依赖 UGUI） | `hierarchy` | `references/hierarchy.md` |
 | 运行 UTF EditMode / PlayMode、查询测试结果 | `test run --mode` / `test status` | `references/tests.md` |
+| 已知 UGUI 控件的静态发现、来源绑定与安全复测 | `ui-index sync/find/bind/resolve/click/annotate` | `references/ui-index.md` |
 | UI 操作、截图、动作录制、自适应 UI 探索（UI 操作和录制需 UGUI） | `click` / `click-at` / `input` / `set-value` / `snapshot` / `record` | `references/interaction.md` |
 | 零侵入调用游戏逻辑 | `gameplay` | `references/gameplay.md` |
 | 可复跑验证脚本 | `scenario` | `references/scenario.md` |

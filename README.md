@@ -136,6 +136,7 @@ uv run unityctl --help
 | `open-scene PATH` | 在 Editor 中打开场景 |
 | `refresh` | 触发脚本重编译并等待完成 |
 | `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
+| `ui-index` | 增量同步、离线查找、用途注释、运行态来源绑定与安全点击（Unity 2022.3 UGUI） |
 | `doctor` | 只读诊断项目配置、CLI/UPM/运行态版本与 Bridge 连通性；可核验任务所需能力 |
 | `hierarchy roots/tree/find/ancestors/inspect` | 只读查询场景 Hierarchy 结构 |
 | `snapshot` | Play Mode 截图（落盘 PNG） |
@@ -445,7 +446,7 @@ skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的
 
 内置 Skill 的触发范围可用[中英双语触发评测](evals/README.md)检查。离线自检随 Python 测试运行；盲评可独立导出与评分。
 
-使用 [UI 索引](docs/unityctl-ui-index.md)可增量同步 UGUI Prefab、离线查找候选控件，以及单独记录用途和证据。
+使用 [UI 索引](docs/unityctl-ui-index.md)可增量同步 UGUI Prefab、离线查找候选控件，记录用途与证据，再对已核验实例做非强制点击。静态候选不等于运行态可点击。
 
 ## 让 Agent 逐步学会玩法
 

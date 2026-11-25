@@ -246,5 +246,25 @@
     "prompt": "我只是想聊这个游戏可能有哪些玩法创意，不运行 Unity，也不读取或保存测试经验。",
     "explicitSkills": [],
     "expected": []
+  },
+  {
+    "id": "zh14",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "把 Assets/UI 里的 UGUI Prefab 增量同步，后续复测按已确认的索引 ID 点击，不再每步看图。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "en12",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "Our Unity editor is closed. Find candidates for the confirm button using the saved prefab index; don't click.",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
   }
 ]

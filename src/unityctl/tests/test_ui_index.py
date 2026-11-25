@@ -156,7 +156,7 @@ def test_cli_sync_and_offline_find(project, monkeypatch, capsys):
             return {"ok": True, "jobId": JOB}
 
     def finished(_project, job, **kwargs):
-        assert job == JOB
+        assert job == JOB and kwargs["poll_interval"] == 0.1
         moved = bool(posted[-1][1]["known"])
         rows = [asset(changed=not moved)]
         return {"status": "succeeded", "result": output(project, ROOT, rows, posted[-1][1]["known"])}
