@@ -34,6 +34,8 @@ h2 { font-size: 1.1rem; }
 .steps { margin: 0; padding: 0; list-style: none; max-block-size: 66vh; overflow: auto; }
 .steps li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 10px; padding: 12px 16px; border-block-end: 1px solid var(--line); }
 .steps li:last-child { border-block-end: 0; }
+.run-time, .step-time { font-variant-numeric: tabular-nums; }
+.step-time { grid-column: 2 / -1; font-size: .86rem; }
 .step-id { overflow-wrap: anywhere; white-space: normal; text-align: start; }
 button { font: inherit; color: var(--blue); cursor: pointer; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: var(--panel); }
 button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }

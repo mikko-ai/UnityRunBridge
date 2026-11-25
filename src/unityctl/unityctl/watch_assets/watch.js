@@ -19,10 +19,61 @@ let chosenStep = null;
 let stepRows = [];
 let visibleFrame = "";
 let eventCount = -1;
+let runStart = null;
+let runEnd = null;
+let lastEventAt = null;
 const rows = new Map();
 
 function writeText(node, text) {
   if (node.textContent !== text) node.textContent = text;
+}
+
+function readTime(at) {
+  const value = typeof at === "string" ? Date.parse(at.replace(/(\.\d{3})\d+/, "$1")) : NaN;
+  return Number.isFinite(value) ? value : null;
+}
+
+function elapsed(start, end) {
+  return start !== null && end !== null ? Math.max(0, end - start) : null;
+}
+
+function clock(ms) {
+  const seconds = Math.floor(ms / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return [...(hours ? [hours] : []), minutes, seconds % 60]
+    .map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function stepDuration(ms) {
+  if (ms === 0) return "0 秒";
+  if (ms < 100) return "< 0.1 秒";
+  return ms < 60_000 ? `${(ms / 1000).toFixed(1)} 秒` : clock(ms);
+}
+
+function updateTimes(state, now) {
+  const active = state.status === "running";
+  const start = readTime(runStart?.at);
+  const finish = readTime(runEnd?.at);
+  const total = elapsed(start, runEnd ? finish : (active ? now : lastEventAt));
+  const runTime = get("run-time");
+  runTime.hidden = total === null;
+  if (total !== null) {
+    const label = runEnd ? "总耗时" : active ? "已运行" : "已记录耗时";
+    writeText(runTime, `${label} ${clock(total)}`);
+  }
+  for (const step of stepRows) {
+    const offset = elapsed(start, step.startedAt);
+    const executing = active && step.status === "running" && !step.hasFinished;
+    const took = elapsed(step.startedAt, executing ? now : step.finishedAt);
+    const parts = [
+      offset === null ? null : `+${clock(offset)}`,
+      took === null ? null : `${executing ? "已执行" : "耗时"} ${stepDuration(took)}`,
+    ].filter(Boolean);
+    const time = rows.get(step.stepIndex).time;
+    time.hidden = !parts.length;
+    writeText(time, parts.join(" · "));
+  }
 }
 
 function pickFrame() {
@@ -73,6 +124,8 @@ function updateRows() {
         renderFrame();
       });
       const status = document.createElement("span");
+      const time = document.createElement("span");
+      time.className = "step-time muted";
       const details = document.createElement("details");
       details.className = "step-detail";
       details.open = true;
@@ -82,9 +135,9 @@ function updateRows() {
       const command = document.createElement("code");
       const result = document.createElement("p");
       details.append(summary, why, command, result);
-      li.append(index, caption, button, status, details);
+      li.append(index, caption, button, status, time, details);
       list.append(li);
-      rows.set(step.stepIndex, {caption, button, status, details, why, command, result});
+      rows.set(step.stepIndex, {caption, button, status, time, details, why, command, result});
     }
     const {caption, button, status, details, why, command, result} = rows.get(step.stepIndex);
     const label = `${actionNames[step.action] || step.action} · ${step.id}${step.code ? ` · ${step.code}` : ""}`;
@@ -122,12 +175,25 @@ function receive(state) {
   if (eventCount !== state.events.length) {
     eventCount = state.events.length;
     const byStep = new Map();
+    runStart = null;
+    runEnd = null;
+    lastEventAt = null;
     for (const event of state.events) {
+      if (event.type === "run-started") runStart = event;
+      if (event.type === "run-finished") runEnd = event;
+      const at = readTime(event.at);
+      if (at !== null) lastEventAt = at;
       if (!Number.isInteger(event.stepIndex)) continue;
-      byStep.set(event.stepIndex, {...byStep.get(event.stepIndex), ...event});
+      const step = {startedAt: null, finishedAt: null, hasFinished: false, ...byStep.get(event.stepIndex), ...event};
+      if (event.type === "step-started") step.startedAt = at;
+      if (event.type === "step-finished") {
+        step.finishedAt = at;
+        step.hasFinished = true;
+      }
+      byStep.set(event.stepIndex, step);
     }
     stepRows = [...byStep.values()];
-    const start = state.events.find((event) => event.type === "run-started");
+    const start = runStart;
     writeText(get("run-name"), start?.name || "尚无监看会话");
     writeText(get("step-count"), start ? Number.isInteger(start.stepsTotal) ? `${stepRows.length} / ${start.stepsTotal}` : `${stepRows.length} 步` : "");
     updateRows();
@@ -136,8 +202,11 @@ function receive(state) {
   const running = stepRows.find((step) => step.status === "running");
   const status = get("run-status");
   status.dataset.status = state.status;
-  writeText(status, running && state.status === "running"
-    ? `运行中 · 第 ${running.stepIndex + 1} 步` : labels[state.status] || "状态未知");
+  writeText(status, state.status === "running"
+    ? (running ? `运行中 · 第 ${running.stepIndex + 1} 步`
+      : runStart?.kind === "agent" ? "等待 Agent 下一步" : "等待下一步")
+    : labels[state.status] || "状态未知");
+  updateTimes(state, Date.now());
 }
 
 get("frame").addEventListener("load", renderFrame);

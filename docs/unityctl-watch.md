@@ -14,6 +14,7 @@ unityctl --project /path/to/project scenario run /path/to/scenario.json --observ
 
 界面会显示 Editor 是否在线、用例状态、步骤进度和 Game View 画面。点击有截图的步骤可回看，选择「返回最新画面」可继续跟随。用例结束或失败后，可继续查看截图；重启服务时可用 `watch --session-id ID` 固定到历史会话。关闭服务用 Ctrl+C，不会关闭 Unity。
 
+- 顶部计时从会话开始算起，包括 Agent 等待下一步的时间；收到结束事件后定格。步骤里显示相对开始时间和单步耗时。若检测到中断但没有结束事件，只显示截至最后一条记录的时间，不把它当作完整耗时。
 - 画面是按步骤获取的 PNG，不是连续视频。显式 Scenario 截图和失败断言的自动截图遵循原有设置；开启观察后，UGUI `click` 在点击前尝试留一帧，且只在点击与截图的原始渲染尺寸吻合时标记真实落点。没有可用截图时，步骤状态仍然会推进。
 - 如果目标在 PNG 上可见，但 `hit-test` 的 UGUI 命中为空，先检查 Editor 的 Game View。固定渲染分辨率过大时，部分可见控件可能超出 Unity 用于射线检测的屏幕边界；可切换到同宽高比且更小的固定分辨率（如竖屏 `720×1280`），重新截图和探测后再点击。不要用强制点击或沿用旧帧来绕过检查。
 - `--observe` 默认关闭，没有额外截屏。开启时仍受项目截图开关、`onScenarioStep`、失败截图开关及配额限制。建议给监看用例保留足够配额；自动截图在快变画面上不能代替视觉断言。
@@ -23,6 +24,7 @@ unityctl --project /path/to/project scenario run /path/to/scenario.json --observ
 ## 可复跑验收
 
 ```bash
+node --test src/unityctl/tests/test_watch_ui.cjs
 uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py watch --unity /path/to/Unity.app
 ```
 
