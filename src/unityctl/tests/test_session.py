@@ -10,6 +10,17 @@ def test_make_session_id_normalizes_name():
     assert make_session_id("Login Flow!", created_at) == "2026-06-30_183012_login-flow"
 
 
+def test_create_session_does_not_clobber_same_second_normalized_name(tmp_path):
+    when = datetime(2026, 6, 30, 18, 30, 12, tzinfo=timezone.utc)
+    first = create_session(tmp_path, "MarbleDrop 截图", None, "scenario", "", created_at=when)
+    second = create_session(tmp_path, "MarbleDrop 点击", None, "scenario", "", created_at=when)
+
+    assert first.session_id == "2026-06-30_183012_marbledrop"
+    assert second.session_id == first.session_id + "-000001"
+    assert json.loads(first.session_json_path.read_text())["name"] == "MarbleDrop 截图"
+    assert json.loads(second.session_json_path.read_text())["sessionId"] == second.session_id
+
+
 def test_create_session_writes_session_json(tmp_path):
     project = tmp_path / "Game"
     project.mkdir()

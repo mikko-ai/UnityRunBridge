@@ -2094,8 +2094,17 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
         _finalize_failed_session(session.session_path, effective.project_path, "scenario_execution_error")
         raise CliError("scenario_execution_error", str(exc)) from exc
 
-    end_response = client.end_session()
-    update_session_status(session.session_path, "stopped", ended_at=format_time(utc_now()))
+    try:
+        end_response = client.end_session()
+    except BridgeClientError as exc:
+        end_response = {"ok": False, "code": exc.code, "message": str(exc)}
+    end_error = None
+    if end_response.get("ok") is not True:
+        end_error = end_response.get("code") or "scenario_session_end_failed"
+        result["status"] = "failed"
+        mark_session_failed(session.session_path, end_error)
+    else:
+        update_session_status(session.session_path, "stopped", ended_at=format_time(utc_now()))
 
     artifacts_dir = session.session_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -2108,7 +2117,10 @@ def _cmd_scenario_run(args: argparse.Namespace) -> dict[str, Any]:
     )
     write_summary(session.session_path, summary_payload)
     if events:
-        events.emit("run-finished", {"status": result["status"]})
+        fields = {"status": result["status"]}
+        if end_error:
+            fields["code"] = end_error
+        events.emit("run-finished", fields)
 
     return {
         "ok": result["status"] == "passed",

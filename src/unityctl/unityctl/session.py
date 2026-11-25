@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import count
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,8 @@ def make_session_id(name: str, created_at: datetime) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     if not slug:
         slug = "session"
-    return f"{stamp}_{slug}"
+    # 留出后缀空间，确保历史索引和 watch 都能读取。
+    return f"{stamp}_{slug[:135]}"
 
 
 def create_session(
@@ -44,9 +46,17 @@ def create_session(
 ) -> SessionPaths:
     created = created_at or utc_now()
     project = Path(project_path).expanduser().resolve()
-    session_id = make_session_id(name, created)
-    session_path = project / ".unity-agent" / "sessions" / session_id
-    session_path.mkdir(parents=True, exist_ok=False)
+    base_id = make_session_id(name, created)
+    sessions = project / ".unity-agent" / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    for index in count():
+        session_id = f"{base_id}-{index:06d}" if index else base_id
+        session_path = sessions / session_id
+        try:
+            session_path.mkdir()
+            break
+        except FileExistsError:
+            continue
 
     payload: dict[str, Any] = {
         "sessionId": session_id,

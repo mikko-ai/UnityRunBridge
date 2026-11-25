@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from unityctl.client import BridgeClient, BridgeClientError, require_bridge_route
+from unityctl.client import BridgeClient, BridgeClientError, BridgeUnreachableError, require_bridge_route
 from unityctl.jobs import JobFailed, JobTimeout, poll_job_with_client
 from unityctl.run_events import click_marker, frame_name
 from unityctl.summary import read_jsonl
@@ -637,9 +637,14 @@ def _resolve_since_sequence(condition: dict[str, Any], step_start_sequence_by_in
 def _wait_for_status(ctx: ScenarioContext, predicate: Callable[[dict[str, Any]], bool], timeout: float) -> dict[str, Any]:
     deadline = ctx.now_fn() + timeout
     while True:
-        status = ctx.client.get_status()
-        if predicate(status):
-            return status
+        try:
+            status = ctx.client.get_status()
+        except BridgeUnreachableError:
+            # Play Mode / Domain Reload 会短暂停止监听；只重试状态读取，不重发动作。
+            pass
+        else:
+            if predicate(status):
+                return status
         if ctx.now_fn() >= deadline:
             raise TimeoutError("等待状态收敛超时")
         ctx.sleep_fn(ctx.poll_interval)

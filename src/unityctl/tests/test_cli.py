@@ -6,7 +6,7 @@ import pytest
 from unityctl import __version__
 from unityctl import cli
 from unityctl.build import BuildError, BuildResult
-from unityctl.client import BridgeClientError
+from unityctl.client import BridgeClientError, BridgeUnreachableError
 from unityctl.convergence import ConvergenceResult
 from unityctl.discovery import BridgeInfo, DiscoveryError
 
@@ -2507,6 +2507,33 @@ def test_scenario_run_exit_code_1_when_assertion_fails(monkeypatch, tmp_path, ca
     assert output["scenario"]["status"] == "failed"
     assert output["scenario"]["stepsFailed"] == 1
     assert output["summary"]["status"] == "failed"
+
+
+@pytest.mark.parametrize("expected, failed_steps", [(101, 0), (999, 1)])
+def test_scenario_run_preserves_report_and_watch_when_session_end_disconnects(
+    monkeypatch, tmp_path, capsys, expected, failed_steps
+):
+    patch_bridge(monkeypatch)
+    project = make_unity_project(tmp_path)
+    scenario = project / "disconnect.json"
+    _write_scenario_file(scenario, gold_expectation=expected)
+
+    def disconnect(self):
+        raise BridgeUnreachableError("reload")
+
+    monkeypatch.setattr(FakeClient, "end_session", disconnect)
+    assert cli.main(["--project", str(project), "scenario", "run", str(scenario), "--observe"]) == 1
+    output = json.loads(capsys.readouterr().out)
+    session = Path(output["sessionPath"])
+    report = json.loads((session / "artifacts" / "scenario-result.json").read_text())
+    final = json.loads((session / "run-events.jsonl").read_text().splitlines()[-1])
+    assert output["sessionEnd"]["code"] == "bridge_unreachable"
+    assert report["status"] == "failed" and report["stepsFailed"] == failed_steps
+    assert final["type"] == "run-finished" and final["status"] == "failed"
+    assert final["code"] == "bridge_unreachable"
+    record = cli.show_run(project, f"scenario:{output['sessionId']}")
+    assert record["status"] == "failed"
+    assert record["code"] == "bridge_unreachable"
 
 
 def test_scenario_run_invalid_scenario_raises_before_creating_session(monkeypatch, tmp_path, capsys):

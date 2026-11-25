@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 import pytest
 
-from unityctl.client import BridgeClientError
+from unityctl.client import BridgeClientError, BridgeUnreachableError
 from unityctl.scenario import (
     ScenarioContext,
     ScenarioValidationError,
@@ -867,6 +867,24 @@ def test_run_scenario_wait_for_timeout_reports_timeout_failure_type(tmp_path):
 
     assert result["steps"][0]["status"] == "failed"
     assert result["steps"][0]["failureType"] == "timeout"
+
+
+def test_run_scenario_play_polls_through_reload_without_reposting(tmp_path):
+    client = FakeClient()
+    statuses = iter([None, {"editorState": "playing"}, {"editorState": "idle"}])
+
+    def read_status():
+        status = next(statuses)
+        if status is None:
+            raise BridgeUnreachableError("reload")
+        return status
+
+    client.get_status = read_status
+    ctx = make_ctx(tmp_path, client)
+    result = run_scenario({"name": "reload", "steps": [{"action": "play"}]}, ctx)
+
+    assert result["status"] == "passed"
+    assert [call for call in client.calls if call[0].startswith("post:")] == [("post:play", None)]
 
 
 def test_run_scenario_teardown_stops_play_mode_when_still_playing(tmp_path):

@@ -15,6 +15,7 @@ unityctl --project /path/to/project scenario run /path/to/scenario.json --observ
 界面会显示 Editor 是否在线、用例状态、步骤进度和 Game View 画面。点击有截图的步骤可回看，选择「返回最新画面」可继续跟随。用例结束或失败后，可继续查看截图；重启服务时可用 `watch --session-id ID` 固定到历史会话。关闭服务用 Ctrl+C，不会关闭 Unity。
 
 - 画面是按步骤获取的 PNG，不是连续视频。显式 Scenario 截图和失败断言的自动截图遵循原有设置；开启观察后，UGUI `click` 在点击前尝试留一帧，且只在点击与截图的原始渲染尺寸吻合时标记真实落点。没有可用截图时，步骤状态仍然会推进。
+- 如果目标在 PNG 上可见，但 `hit-test` 的 UGUI 命中为空，先检查 Editor 的 Game View。固定渲染分辨率过大时，部分可见控件可能超出 Unity 用于射线检测的屏幕边界；可切换到同宽高比且更小的固定分辨率（如竖屏 `720×1280`），重新截图和探测后再点击。不要用强制点击或沿用旧帧来绕过检查。
 - `--observe` 默认关闭，没有额外截屏。开启时仍受项目截图开关、`onScenarioStep`、失败截图开关及配额限制。建议给监看用例保留足够配额；自动截图在快变画面上不能代替视觉断言。
 - 监看只读，且只绑定本机回环地址，访问地址含随机凭据。不要分享该地址或转发端口。截图不会上传，也不需要 Midscene 或模型。
 - 运行事件与现有会话产物相邻保存：`.unity-agent/sessions/<id>/run-events.jsonl`。页面可监看启用了观察的 Scenario 或显式记录的 Agent 会话，不把 UTF 或 Midscene 报告当作实时进度。
