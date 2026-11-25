@@ -1,6 +1,6 @@
 ---
 name: unityctl
-description: 用 unityctl CLI 验证 Unity 项目。适用于启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
+description: 用 unityctl CLI 验证 Unity 项目。适用于旧工程 Bridge 版本与能力诊断、启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
 x-unityctl-version: __UNITYCTL_VERSION__
 ---
 
@@ -36,7 +36,7 @@ unityctl stop --latest
 ## 环境准备
 
 ```bash
-unityctl doctor            # 诊断：项目配置、UPM 包、Editor 进程、Bridge 连通性
+unityctl doctor            # 只读诊断：工程配置、CLI/UPM/运行态版本、Bridge 连通性
 unityctl start             # 启动 Unity Editor 并等待 Bridge 就绪（已在运行则幂等返回 already_running）
 unityctl status            # 查询 editorState、编译状态、当前场景
 ```
@@ -51,6 +51,19 @@ unityctl config validate    # 确认配置无误后再 start
 
 - `unityctl config show` 输出合并后的有效配置（项目配置 + 本机配置），排查配置问题时先看它。
 - `start` 返回 `editor_already_running` 表示项目被另一个 Editor 实例占用但 Bridge 未就绪，此时不要重试 `start`，先运行 `unityctl doctor` 检查，必要时请用户处理已打开的 Unity 窗口。
+
+### 旧工程接入与能力修复
+
+首次接手旧工程、CLI 升级后或命令返回 `bridge_capability_missing` 时，先运行 `unityctl doctor`。再按任务核验需要的能力或路由，例如验证坐标点击：
+
+```bash
+unityctl doctor --require-capability interaction --require-route POST interaction/click-at
+```
+
+1. 读取 `versions` 和 `warnings`。Git 分支、提交和本地包路径不一定声明版本；`declaredUpmVersion: null` 时保留引用，不从文件名猜版本。仅版本不同不是失败；声明和加载版本不同，先检查 Package Manager 是否完成解析和编译。
+2. 读取 `requirements`。只对任务需要且明确 `missing` 的项规划修复；`unverified` 表示 Editor 不可达或元数据不足，不要当成缺失。用只读检查排除可选依赖和编译问题，例如无 UGUI 的工程并不会因升级 Bridge 就出现坐标点击能力。
+3. 按 `repairGuidance` 收集证据并给出最小修复方案。若确实要升级，先确认目标包支持任务和 Unity 2022.3，展示现有和目标引用、拟改动和回滚方式。凡 `requiresApproval: true`，取得用户明确授权后才执行：退出 Play Mode，保留原引用，只更新 Bridge 依赖，等待 Unity 解析并重新编译。不要猜测正式标签、手改 lock 文件、升级 Unity Editor 或覆盖项目配置；`init --install-package` 不会替换已有依赖，`init --force` 也不是升级工具。
+4. 使用 `verify_repair` 的 `argv` 重新运行诊断（按参数数组调用，不拼成 shell 字符串），核对实际加载版本和所需能力，再重跑获准的最小任务。没拿到通过证据就报告阻塞，不称已修复。
 
 ## 能力索引
 

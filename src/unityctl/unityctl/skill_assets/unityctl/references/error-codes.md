@@ -12,6 +12,7 @@
 | `editor_already_running` | 项目被占用但 Bridge 未就绪，运行 `unityctl doctor` 检查 |
 | `bridge_unreachable` | Bridge 不可达，通常 Editor 未启动，运行 `unityctl start` |
 | `bridge_capability_missing` | 缺少所需能力；检查可选依赖（如 `com.unity.ugui` 才能启用 `interaction`/`recording`）或 Bridge 版本后重试。完整安装约 30 路由/9 capability，Core-only（NoUGUI）为 24/7 |
+| `bridge_capability_unverified` | `doctor` 无法核验显式要求的能力或路由；检查 Editor/Bridge 和元数据，不按缺失处理，也不直接升级 |
 | `node_not_found` / `ambiguous_path` | hierarchy 查询的 path/instanceId 找不到或有歧义，见 `hierarchy.md` |
 | `unknown_component` / `ambiguous_component` | hierarchy 查询里的组件/接口名无法解析，改用完整类型名 |
 | `capture_disabled` / `agent_capture_denied` | 截图被 `config.json` 中 `capture.screenshot` 配置关闭，检查 `enabled`/`allowAgentRequest` |

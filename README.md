@@ -136,7 +136,7 @@ uv run unityctl --help
 | `open-scene PATH` | 在 Editor 中打开场景 |
 | `refresh` | 触发脚本重编译并等待完成 |
 | `logs` / `errors` / `summary` | 读取 session 日志、错误与 summary |
-| `doctor` | 诊断项目配置与 Bridge 连通性 |
+| `doctor` | 只读诊断项目配置、CLI/UPM/运行态版本与 Bridge 连通性；可核验任务所需能力 |
 | `hierarchy roots/tree/find/ancestors/inspect` | 只读查询场景 Hierarchy 结构 |
 | `snapshot` | Play Mode 截图（落盘 PNG） |
 | `click-at` | 按截图像素点击最上层 UGUI 命中点；Game View 尺寸变化时拒绝执行 |
@@ -251,6 +251,18 @@ unityctl doctor
 ```
 
 所有命令均输出 JSON。成功响应中包含 `"ok": true`。`play`/`stop`/`refresh` 会轮询 Unity 状态直到收敛（进入/退出 Play Mode、编译完成），可以用 `--timeout` 覆盖配置中的默认超时，用 `--no-wait`（`refresh` 除外）跳过等待。
+
+### 旧工程升级诊断
+
+升级全局 CLI 后，先在旧工程运行 `unityctl doctor`。报告的 `versions` 包含 CLI 版本、`Packages/manifest.json` 中的 Bridge 引用和可识别的声明版本，以及 Editor 实际加载的 Bridge 版本。分支、提交和本地路径只报告引用，不猜测版本。版本不同写入 `warnings`，本身不会导致检查失败。
+
+如果任务依赖特定能力，可重复指定 `--require-capability NAME` 和 `--require-route METHOD PATH`，例如：
+
+```bash
+unityctl doctor --require-capability interaction --require-route POST interaction/click-at
+```
+
+检查只读取 Bridge 的能力清单，不会执行点击或修改工程。明确缺少能力时，按 `repairGuidance` 先排查可选依赖，再决定是否升级 Bridge；缺乏元数据时标为未核验，不据此修改工程。需修改依赖的步骤标记为 `requiresApproval: true`；确认后才更换依赖，重新加载并按输出的命令复查。
 
 ## Session-based 运行观测
 

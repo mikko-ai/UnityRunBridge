@@ -42,6 +42,7 @@ from unityctl.discovery import (
     is_unity_project_locked,
     read_bridge_info,
 )
+from unityctl.doctor import check_requirements, read_bridge_reference, repair_guidance, version_report
 from unityctl.editor import start_editor
 from unityctl.health import HealthError, run_health
 from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
@@ -487,11 +488,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser(
         "doctor",
-        help="诊断项目配置与 Bridge 连通性",
-        description="检查项目根目录、配置文件、UPM 包、bridge.json 和 Bridge HTTP 可达性。",
+        help="诊断项目配置、Bridge 版本和连通性",
+        description="只读检查 Unity 工程、CLI/UPM/Bridge 版本和任务所需能力；不会修改项目。",
         formatter_class=_HelpFormatter,
     )
     _add_project_option(doctor)
+    doctor.add_argument("--require-capability", action="append", default=[], metavar="NAME",
+                        help="核验任务必需的 Bridge 能力，可重复指定")
+    doctor.add_argument("--require-route", action="append", nargs=2, default=[], metavar=("METHOD", "PATH"),
+                        help="核验任务必需的 Bridge 路由，可重复指定；不会调用该路由")
 
     build = subparsers.add_parser(
         "build",
@@ -2210,12 +2215,13 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
         else:
             add("unity_executable_path", False, str(executable) if executable else "未配置")
 
+    reference = None
     if project_path is not None:
-        add(
-            "upm_package_installed",
-            is_bridge_package_installed(project_path),
-            UNITY_AGENT_BRIDGE_PACKAGE_ID,
-        )
+        try:
+            reference = read_bridge_reference(project_path)
+            add("upm_package_installed", reference is not None, UNITY_AGENT_BRIDGE_PACKAGE_ID)
+        except (OSError, ValueError) as exc:
+            add("upm_package_installed", False, str(exc))
 
     info: BridgeInfo | None = None
     if project_path is not None:
@@ -2226,16 +2232,26 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
             add("bridge_json", False, str(exc))
 
     bridge_reachable = False
+    loaded_version = None
+    capability_response = {}
+    requested = bool(args.require_capability or args.require_route)
     if info is not None:
         alive = is_pid_alive(info.pid)
         add("editor_pid_alive", alive, f"pid={info.pid}")
         if alive:
             try:
-                BridgeClient(info.base_url, info.token).get_status()
+                client = BridgeClient(info.base_url, info.token)
+                loaded_version = client.get_status().get("bridgeVersion")
                 bridge_reachable = True
                 add("bridge_reachable", True, info.base_url)
             except BridgeClientError as exc:
                 add("bridge_reachable", False, str(exc))
+            if bridge_reachable and requested:
+                try:
+                    capability_response = client.get_capabilities()
+                    add("bridge_capabilities_query", True)
+                except BridgeClientError as exc:
+                    add("bridge_capabilities_query", False, str(exc))
         else:
             add("bridge_reachable", False, "editor process not alive")
 
@@ -2258,8 +2274,33 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
         else:
             add("project_lock", True, "项目未被占用，可以运行 unityctl start")
 
-    overall_ok = all(check["ok"] for check in checks)
-    return {"ok": overall_ok, "code": "ok" if overall_ok else "internal_error", "checks": checks}
+    versions, warnings = version_report(reference, loaded_version)
+    requirements = check_requirements(capability_response, args.require_capability, args.require_route)
+    recheck = ["unityctl", "doctor"]
+    if project_path is not None:
+        recheck.extend(["--project", str(project_path)])
+    for capability in args.require_capability:
+        recheck.extend(["--require-capability", capability])
+    for method, path in args.require_route:
+        recheck.extend(["--require-route", method, path])
+    environment_ok = all(check["ok"] for check in checks)
+    states = {check["state"] for check in requirements}
+    code = "ok"
+    if not environment_ok:
+        code = "internal_error"
+    elif "missing" in states:
+        code = "bridge_capability_missing"
+    elif "unverified" in states:
+        code = "bridge_capability_unverified"
+    return {
+        "ok": code == "ok",
+        "code": code,
+        "checks": checks,
+        "versions": versions,
+        "warnings": warnings,
+        "requirements": requirements,
+        "repairGuidance": repair_guidance(requirements, recheck),
+    }
 
 
 def cmd_runs(args: argparse.Namespace) -> dict[str, Any]:

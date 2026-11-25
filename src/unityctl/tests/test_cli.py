@@ -1344,6 +1344,78 @@ def test_doctor_reports_all_checks(monkeypatch, tmp_path, capsys):
     assert exit_code in (0, 1)
 
 
+@pytest.mark.parametrize(
+    ("advertised", "expected", "states"),
+    [
+        ({"capabilities": ["interaction"], "routes": [{"method": "POST", "path": "interaction/click-at"}]},
+         "ok", ["available", "available"]),
+        ({"capabilities": ["interaction"], "routes": []},
+         "bridge_capability_missing", ["available", "missing"]),
+        ({"capabilities": ["core"], "legacy": True},
+         "bridge_capability_unverified", ["unverified", "unverified"]),
+    ],
+)
+def test_doctor_checks_versions_and_required_route_without_writing(
+    monkeypatch, tmp_path, capsys, advertised, expected, states,
+):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages/manifest.json"
+    reference = cli.default_bridge_package_ref("0.3.2")
+    manifest.write_text(json.dumps({"dependencies": {cli.UNITY_AGENT_BRIDGE_PACKAGE_ID: reference}}))
+    unity = tmp_path / "Unity"
+    unity.touch()
+    cli.init_project_config(project_path=project, unity_path=unity)
+    paths = [manifest, project / ".unity-agent/config.json", project / ".unity-agent/config.local.json"]
+    before = [path.read_bytes() for path in paths]
+    monkeypatch.setattr(cli, "read_bridge_info", lambda path: make_bridge_info())
+    monkeypatch.setattr(cli, "is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(cli, "is_unity_project_locked", lambda path: False)
+    client = FakeClient("http://localhost:1", "secret-token", status_response={"bridgeVersion": "0.4.1"})
+    monkeypatch.setattr(cli, "BridgeClient", lambda *args: client)
+    monkeypatch.setattr(client, "get_capabilities", lambda: advertised)
+
+    flags = ["--require-capability", "interaction", "--require-route", "post", "/interaction/click-at"]
+    exit_code = cli.main(["doctor", "--project", str(project), *flags])
+    report = json.loads(capsys.readouterr().out)
+
+    assert exit_code == int(expected != "ok")
+    assert report["code"] == expected
+    assert report["versions"] == {
+        "cliVersion": __version__,
+        "declaredUpmReference": reference,
+        "declaredUpmVersion": "0.3.2",
+        "loadedBridgeVersion": "0.4.1",
+    }
+    assert {warning["code"] for warning in report["warnings"]} == {
+        "cli_bridge_version_mismatch", "declared_loaded_version_mismatch",
+    }
+    assert [requirement["state"] for requirement in report["requirements"]] == states
+    guidance = report["repairGuidance"]
+    assert [step["action"] for step in guidance if step["requiresApproval"]] == (
+        ["update_bridge_dependency"] if expected == "bridge_capability_missing" else []
+    )
+    if guidance:
+        assert guidance[-1]["argv"] == ["unityctl", "doctor", "--project", str(project), *flags]
+    assert client.calls == [("status", None)]
+    assert [path.read_bytes() for path in paths] == before
+
+
+def test_doctor_keeps_local_reference_without_guessing_declared_version(tmp_path, capsys):
+    project = make_unity_project(tmp_path / "Game")
+    manifest = project / "Packages/manifest.json"
+    reference = "file:../bridge-0.4.1.tgz"
+    manifest.write_text(json.dumps({"dependencies": {cli.UNITY_AGENT_BRIDGE_PACKAGE_ID: reference}}))
+
+    assert cli.main(["doctor", "--project", str(project)]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["versions"] == {
+        "cliVersion": __version__,
+        "declaredUpmReference": reference,
+        "declaredUpmVersion": None,
+        "loadedBridgeVersion": None,
+    }
+
+
 def _make_build_result(**overrides) -> BuildResult:
     defaults = dict(
         ok=True,

@@ -5,6 +5,7 @@
 ## 当前范围
 
 - 服务对象是需要开发和测试 Unity 项目的 Agent：从 `unityctl` 和内置 Skill 进入，经本地 HTTP Bridge 操作 Unity Editor。**只以 Unity 2022.3 为验收范围，实测版本为 2022.3.62f2。** 历史调研里的 Unity 2023 不代表支持承诺。
+- 旧工程先用 `unityctl doctor` 对照 CLI、UPM 声明和运行态 Bridge，再按任务加 `--require-capability` / `--require-route`。版本不同只提示；能力缺失时按 `repairGuidance` 排查，项目依赖变更需要人工确认。见 [旧工程升级诊断](../README.md#旧工程升级诊断)。
 - 确定性验证优先用 UTF（EditMode / PlayMode）或 Scenario。当前 Agent 可直接读取 Game View PNG、选择坐标并通过 `agent-run` 记录操作。只读的本地中文 `watch` 显示主动提供的操作理由、命令、点击落点和断言，不显示内部推理；画面是按步骤更新的截图，不是视频。
 - `watch` 不调用模型，不需要 Midscene。Midscene 是独立可选适配器；其自主视觉判断才需要模型。不要默认发送截图、开启 Gameplay 权限或暴露回环端口。Agent、Scenario、UTF、Midscene 四类历史记录统一通过 `unityctl runs list/show` 查询；并非四类都能实时监看。
 - 普通 GitHub CI 只跑 Python、无模型 Midscene 适配器和 UPM 包校验，不运行 Unity，不恢复自托管 Mac Runner。Unity 实机回归在本机。Release 是独立的标签发布流程；未获授权，不创建或推送标签、不发布。
@@ -55,6 +56,7 @@ uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.p
 | 已验证：九配置全量矩阵 | `2a95ce0` 的单行修复在提交前用本机 Unity 2022.3.62f2 完整复跑：9 组、3,105 项通过、0 失败、42 跳过。原先失败的点击审计断言在 6 种带 UGUI 的配置均通过；测试断言未改。 |
 | 已验证：无模型分发闭环 | 合并基线 `fbd6d9c` 用新构建的 wheel 和 UPM tarball，在临时弹窗工程跑通点击、监看、UTF 正反例和四类记录。同一合并版本本机 453 项 Python 测试、8 项适配器测试及包校验通过；后续审计修复单独验收见上一行。 |
 | 已验证：远端轻量检查 | [合并基线 CI](https://github.com/mikko-ai/UnityRunBridge/actions/runs/45385218703) 的 Python、无模型适配器和 UPM 三项通过。这不是 Unity 实机结果。 |
+| 已验证：旧 Bridge 诊断 | `0.5.0` 候选 CLI 源码连接 Unity 2022.3.62f2 临时工程中正式发布的 `0.4.1` UPM 包：版本不一致只告警；Core 状态接口可用；无 UGUI 时能报告坐标点击能力缺失并给出审批步骤。诊断前后 manifest、lock 和两份配置内容不变；没有实际执行升级。 |
 | 未纳入本期：真实模型和生产项目验收 | Midscene 真实模型正反例按决定暂不执行。弹窗和 fixture 的证据不能代替指定游戏工程、真机或 Unity 其他版本的验收。 |
 | 未验证：本批改动的新版本发布 | 本批没有打新标签或做发布端到端验收。旧 Release 的成功不能替代新版本验收。 |
 
