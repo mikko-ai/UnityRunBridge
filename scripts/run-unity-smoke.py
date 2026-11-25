@@ -414,8 +414,18 @@ def main():
     args = parser.parse_args()
     if not __debug__:
         parser.error("run this smoke test without Python optimization (assertions must be active)")
-    if args.suite == "model" and (not args.allow_model_requests or not os.environ.get("MIDSCENE_MODEL_NAME")):
-        parser.error("model requires --allow-model-requests and MIDSCENE_MODEL_NAME")
+    if args.suite == "model":
+        if not args.allow_model_requests:
+            parser.error("model requires --allow-model-requests")
+        try:
+            config = subprocess.run(
+                ["node", str(ROOT / "examples/midscene-game-view/model-check.mjs")],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            parser.error("无法完成 Midscene 配置检查，请确认 Node.js 可用")
+        if config.returncode:
+            parser.error(config.stderr.strip() or "Midscene 配置检查失败")
     if args.suite == "delivery" and (not args.upm or args.upm.suffix != ".tgz" or not args.upm.is_file()):
         parser.error("delivery requires --upm pointing to a local .tgz")
     unity = args.unity

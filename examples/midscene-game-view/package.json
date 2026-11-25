@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "model:check": "node model-check.mjs",
     "smoke": "node smoke.mjs"
   },
   "dependencies": {

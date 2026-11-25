@@ -22,7 +22,7 @@ uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.p
 
 ## 单独验收 Midscene 真实模型
 
-仅在你确认模型配置及画面传输范围后运行；不在 `all` 或默认 CI 中调用模型。先在 `examples/midscene-game-view/` 运行 `npm ci --ignore-scripts`，再按 [Midscene 模型配置说明](https://www.midscenejs.com/model-api-setup) 给本机进程配置环境变量（不要把密钥写入仓库或日志）。
+仅在你确认模型配置及画面传输范围后运行；不在 `all` 或默认 CI 中调用模型。先在 `examples/midscene-game-view/` 运行 `npm ci --ignore-scripts`，再按 [UnityRunBridge 用户级模型配置](../examples/midscene-game-view/README.md#unityrunbridge-用户级模型配置) 配置并检查。验收脚本在打开 Unity 前检查本机配置（不发起模型请求）。
 
 ```bash
 uv run --project src/unityctl --locked --no-dev python scripts/run-unity-smoke.py model \

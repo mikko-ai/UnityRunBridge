@@ -110,7 +110,7 @@ export class VisualRecord {
   }
 }
 
-export async function recordedAgent(project, run, { name, mode, reportName }, execute) {
+export async function recordedAgent(project, run, { name, mode, reportName, modelConfig }, execute) {
   const record = await VisualRecord.create(project, name, mode);
   const previousLocation = process.env.MIDSCENE_RUN_DIR;
   process.env.MIDSCENE_RUN_DIR = join(record.directory, "midscene_run");
@@ -121,7 +121,9 @@ export async function recordedAgent(project, run, { name, mode, reportName }, ex
     // Output location must be set before constructing the SDK report manager.
     const { Agent } = await import("@midscene/core");
     const device = new UnityGameView(run, { onFrame: (png) => record.frame(png) });
-    agent = new Agent(device, { generateReport: true, reportFileName: reportName, autoPrintReportMsg: false });
+    agent = new Agent(device, {
+      generateReport: true, reportFileName: reportName, autoPrintReportMsg: false, modelConfig,
+    });
     result = await execute(agent, record, device);
     await agent.destroy();
     status = "passed";

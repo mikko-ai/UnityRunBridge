@@ -4,7 +4,11 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [SemVer](https://semver.org/)。
 
-## [0.4.1]（候选，未发布）
+## [0.5.0]（未发布）
+
+- 可选 Midscene 插件支持 `~/.unity-agent-bridge/plugins/midscene.json` 用户级共享配置；可在本机检查配置，不需要启动 Unity 或调用模型。
+
+## [0.4.1]（已发布）
 
 ### 修复
 

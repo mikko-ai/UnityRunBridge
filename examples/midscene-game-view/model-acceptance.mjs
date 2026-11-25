@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { unityctlRunner } from "./game-view.mjs";
+import { loadModelConfig } from "./model-config.mjs";
 import { recordedAgent } from "./run-record.mjs";
 
 const falseAssertion = "midscene-fixture-negative";
@@ -33,15 +34,16 @@ export async function verifyModel(agent, readFocus, step = (_id, _action, perfor
 
 async function main() {
   const [project, executable, permission] = process.argv.slice(2);
-  if (!project || !executable || permission !== "--allow-model-requests" || !process.env.MIDSCENE_MODEL_NAME) {
-    console.error("需要测试工程、unityctl 路径、MIDSCENE_MODEL_NAME 和 --allow-model-requests");
+  if (!project || !executable || permission !== "--allow-model-requests") {
+    console.error("需要测试工程、unityctl 路径和 --allow-model-requests");
     process.exitCode = 2;
     return;
   }
+  const { modelConfig } = await loadModelConfig();
   const run = unityctlRunner(project, executable);
   const focus = async () => (await run(["gameplay", "invoke", "UnityRunBridge.Examples.UiReviewDemo.FocusedControl"])).result;
   await recordedAgent(project, run, {
-    name: "Midscene 模型验收", mode: "model", reportName: "unity-2022-model-acceptance",
+    name: "Midscene 模型验收", mode: "model", reportName: "unity-2022-model-acceptance", modelConfig,
   }, (agent, record) => verifyModel(agent, focus, record.step.bind(record)));
 }
 
