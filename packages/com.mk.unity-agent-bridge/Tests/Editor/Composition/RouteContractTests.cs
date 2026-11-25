@@ -48,6 +48,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             ("POST", "profiling/stop"),
             ("GET", "profiling/status"),
             ("POST", "health/scan-prefabs"),
+            ("POST", "ui-index/scan"),
             ("GET", "capabilities"),
         };
 
@@ -63,6 +64,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             "jobs",
             "profiling",
             "recording",
+            "ui-index",
         };
 
         private static readonly string[] NoUguiCapabilities =
@@ -87,7 +89,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             List<(string Method, string Path)> expected = new List<(string, string)>();
             foreach ((string method, string path) in FullInstallRoutes)
             {
-                if (path.StartsWith("interaction/") || path.StartsWith("recording/"))
+                if (path.StartsWith("interaction/") || path.StartsWith("recording/") || path.StartsWith("ui-index/"))
                 {
                     continue;
                 }
@@ -99,7 +101,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
         }
 
         [Test]
-        public void FullInstall_RegistersExactlyThirtyThreeRoutesInOrder()
+        public void FullInstall_RegistersRoutesInOrder()
         {
             if (!HasUguiCapabilities())
             {
@@ -108,7 +110,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
 
             IReadOnlyList<(string Method, string Path)> actual = RouteTable.ListRoutes();
 
-            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 34");
+            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 35");
             for (int i = 0; i < FullInstallRoutes.Length; i++)
             {
                 Assert.AreEqual(FullInstallRoutes[i].Method, actual[i].Method, $"route[{i}].method");
@@ -117,7 +119,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
         }
 
         [Test]
-        public void FullInstall_CapabilitiesAreExactlyNineInOrdinalOrder()
+        public void FullInstall_CapabilitiesAreInOrdinalOrder()
         {
             if (!HasUguiCapabilities())
             {
@@ -126,7 +128,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
 
             IReadOnlyList<string> actual = CapabilityRegistry.All();
 
-            Assert.AreEqual(FullInstallCapabilities.Length, actual.Count, "完整安装 capability 数应为 9");
+            Assert.AreEqual(FullInstallCapabilities.Length, actual.Count, "完整安装 capability 数应为 10");
             for (int i = 0; i < FullInstallCapabilities.Length; i++)
             {
                 Assert.AreEqual(FullInstallCapabilities[i], actual[i], $"capability[{i}]");
