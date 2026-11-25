@@ -3,8 +3,10 @@
 
 import argparse
 import json
+import math
 import os
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -18,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "scripts" / "fixtures" / "smoke"
 BRIDGE = ROOT / "packages" / "com.mk.unity-agent-bridge"
 FOCUS = "UnityRunBridge.Examples.UiReviewDemo.FocusedControl"
+BASELINE_RESET = "UiLocateBaselineReset.Reset"
 
 
 def write_json(path, value):
@@ -35,21 +38,30 @@ def project_at(base, name, dependencies):
     return project
 
 
-def cli(project, *args, expected="ok", timeout=30, save=None):
+def cli(project, *args, expected="ok", timeout=30, save=None, metrics=None):
+    started = time.perf_counter_ns()
     result = subprocess.run(
         [sys.executable, "-m", "unityctl.cli", "--project", str(project), *map(str, args)],
         capture_output=True, text=True, timeout=timeout,
     )
+    if metrics is not None:
+        metrics.append({
+            "command": str(args[0]),
+            "millis": (time.perf_counter_ns() - started) / 1_000_000,
+            "responseBytes": len((result.stdout or result.stderr).encode("utf-8")),
+            "exitCode": result.returncode,
+        })
     if save:
         (project / save).write_text(result.stdout or result.stderr, encoding="utf-8")
     try:
         data = json.loads(result.stdout or result.stderr)
     except ValueError:
         raise RuntimeError(f"{args}: {result.stdout}\n{result.stderr}") from None
-    if expected == "ok":
-        assert result.returncode == 0 and data.get("ok") is True, (args, data)
+    accepted = (expected,) if isinstance(expected, str) else expected
+    if result.returncode == 0:
+        assert data.get("ok") is True and "ok" in accepted, (args, data)
     else:
-        assert result.returncode != 0 and data.get("code") == expected, (args, data)
+        assert data.get("ok") is False and data.get("code") in accepted, (args, data)
     return data
 
 
@@ -119,11 +131,11 @@ def capture(project, width, height, name):
     return frame
 
 
-def click(project, frame, x, y, *, expected="ok", adjust_width=0):
+def click(project, frame, x, y, *, expected="ok", adjust_width=0, metrics=None):
     reference = frame["referenceScreen"]
     return cli(project, "click-at", "--x", x, "--y", y, "--image-width", frame["width"],
                "--image-height", frame["height"], "--reference-width", reference["width"] + adjust_width,
-               "--reference-height", reference["height"], expected=expected)
+               "--reference-height", reference["height"], expected=expected, metrics=metrics)
 
 
 def verify_delivery_setup(project, unity, upm):
@@ -157,7 +169,7 @@ def verify_delivery_setup(project, unity, upm):
     assert (project / ".agents/skills/unityctl/SKILL.md").is_file()
 
 
-def run_visual(base, unity, width, height, *, watch=False, model=False, records=False, upm=None):
+def run_visual(base, unity, width, height, *, watch=False, model=False, records=False, upm=None, locate_baseline=False):
     dimensions = f"{width}x{height}"
     project = project_at(base, dimensions, {
         **({"com.mk.unity-agent-bridge": f"file:{BRIDGE}"} if upm is None else {}),
@@ -176,6 +188,13 @@ def run_visual(base, unity, width, height, *, watch=False, model=False, records=
         "gameplay": {"enabled": True, "whitelist": [FOCUS]},
         "capture": {"screenshot": {"enabled": True, "allowAgentRequest": True, "agentImageAccess": "allow"}},
     }
+    if locate_baseline:
+        shutil.copyfile(FIXTURES / "UiLocateBaselineReset.cs", project / "Assets/UiLocateBaselineReset.cs")
+        demo_settings["gameplay"]["whitelist"].append(BASELINE_RESET)
+        # Do not compete with the user's open Unity Editor for the default Bridge port.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            demo_settings["bridge"] = {"preferredPort": probe.getsockname()[1]}
     if upm is None:
         write_json(config, demo_settings)
     editor = subprocess.Popen([str(unity), "-projectPath", str(project), "-logFile", str(project / "editor.log"), "-executeMethod", "PrepareGameView.Setup"],
@@ -205,6 +224,8 @@ def run_visual(base, unity, width, height, *, watch=False, model=False, records=
             verify_agent_watch(project)
             verify_offline_record(project)
             return project
+        if locate_baseline:
+            return run_locate_baseline(project, width, height)
         cli(project, "play", "--session", "coordinate-smoke")
         before = capture(project, width, height, "before")
         x, y = before["width"] / 2, before["height"] / 2
@@ -223,6 +244,101 @@ def run_visual(base, unity, width, height, *, watch=False, model=False, records=
         print(f"{dimensions}: coordinate clicks, stale size and blocking overlay verified", flush=True)
     finally:
         terminate(editor)
+
+
+def run_locate_baseline(project, width, height):
+    """Compare operation sequences on the same ready screen, not simulated model time."""
+    opened = "ReviewCanvas/Open"
+    refused = ("ok", "no_click_handler", "game_view_resized", "occluded", "not_interactable")
+    play = []
+    stop = []
+    warmups = []
+    samples = []
+    strategies = ("image", "hierarchy", "known-path")
+
+    def execute(strategy):
+        metrics = []
+        artifact_bytes = 0
+        failure = None
+        result = {}
+        if strategy == "image":
+            frame = cli(project, "snapshot", "--max-long-edge", 640, metrics=metrics)
+            assert frame["referenceScreen"] == {"width": width, "height": height}, frame
+            artifact_bytes = Path(frame["path"]).stat().st_size
+            x, y = frame["width"] // 2, frame["height"] // 2
+            hit = cli(project, "hit-test", "--x", x, "--y", y, "--image-width", frame["width"],
+                      "--image-height", frame["height"], metrics=metrics)
+            hits = hit["ugui"]["hits"]
+            if not hits or not (hits[0]["path"] == opened or hits[0]["path"].startswith(opened + "/")):
+                failure = {"stage": "hit-test", "code": "unexpected_hit", "top": hits[0] if hits else None}
+            else:
+                result = click(project, frame, x, y, metrics=metrics,
+                               expected=refused)
+                if not result["ok"]:
+                    failure = {"stage": "click-at", "code": result["code"], "hit": hits[0]}
+        elif strategy == "hierarchy":
+            found = cli(project, "hierarchy", "find", "--name", "Open", "--under", "ReviewCanvas",
+                        "--component", "Button", "--active-only", metrics=metrics)
+            assert not found["truncated"] and found["matchedCount"] == 1, found
+            path = found["nodes"][0]["path"]
+            assert path == opened, found
+            result = cli(project, "click", path, metrics=metrics, expected=refused)
+        else:
+            result = cli(project, "click", opened, metrics=metrics, expected=refused)
+        if failure is None and not result["ok"]:
+            failure = {"stage": "click", "code": result["code"]}
+        # On a refusal the postcondition must prove no modal opened. Never retry
+        # an issued click in the same sample. Positive samples explicitly reset.
+        verification = []
+        observed = cli(project, "gameplay", "invoke", FOCUS, metrics=verification)["result"]
+        if failure is None:
+            assert result["clicked"] == opened and observed == "confirm", (result, observed)
+            assert cli(project, "gameplay", "invoke", BASELINE_RESET,
+                       metrics=verification)["result"] == "launcher"
+        else:
+            assert observed == "launcher", (failure, observed)
+        return {
+            "strategy": strategy, "expectedTarget": opened, "actualTarget": result.get("clicked"),
+            "failure": failure,
+            "cliMillis": sum(entry["millis"] for entry in metrics),
+            "responseBytes": sum(entry["responseBytes"] for entry in metrics),
+            "artifactBytes": artifact_bytes, "calls": len(metrics), "commands": metrics, "verifyAndReset": verification,
+        }
+
+    cli(project, "play", "--session", "ui-locate-baseline", metrics=play)
+    try:
+        assert cli(project, "gameplay", "invoke", FOCUS)["result"] == "launcher"
+        for strategy in strategies:
+            warmups.append(execute(strategy))
+        for index in range(20):
+            order = strategies[index % len(strategies):] + strategies[:index % len(strategies)]
+            samples.extend(execute(s) for s in order)
+        for _ in range(20):
+            unsettled = [strategy for strategy in strategies
+                         if sum(s["strategy"] == strategy and s["failure"] is None for s in samples) < 20]
+            if not unsettled:
+                break
+            samples.extend(execute(strategy) for strategy in unsettled)
+    finally:
+        cli(project, "stop", "--latest", metrics=stop)
+    summary = {}
+    for strategy in strategies:
+        selected = [x for x in samples if x["strategy"] == strategy]
+        successful = [row for row in selected if row["failure"] is None]
+        times = sorted(row["cliMillis"] for row in successful)
+        n = len(times)
+        summary[strategy] = {
+            "n": n, "attempts": len(selected), "failed": len(selected) - n,
+            "p50Millis": (times[(n - 1) // 2] + times[n // 2]) / 2 if n else None,
+            "p95Millis": times[math.ceil(.95 * n) - 1] if n else None,
+            "callsPerSuccess": successful[0]["calls"] if n else None,
+        }
+    write_json(project / "ui-locate-baseline.json", {
+        "layout": {"width": width, "height": height},
+        "play": play, "stop": stop, "warmups": warmups, "samples": samples, "summary": summary,
+    })
+    print(f"{width}x{height} baseline: {json.dumps(summary)}", flush=True)
+    return all(group["n"] >= 20 for group in summary.values())
 
 
 def terminate(process):
@@ -406,7 +522,7 @@ def verify_run_index(work, unity, upm=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
     parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，delivery 专用")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
@@ -441,6 +557,12 @@ def main():
     if args.suite in {"visual", "all"}:
         for width, height in ((1280, 720), (720, 1280)):
             run_visual(work, unity.resolve(), width, height)
+    if args.suite == "locate-baseline":
+        adequate_samples = [
+            run_visual(work, unity.resolve(), width, height, locate_baseline=True)
+            for width, height in ((640, 360), (360, 640))
+        ]
+        assert all(adequate_samples), "insufficient successful samples; see both layout reports"
     if args.suite in {"watch", "all"}:
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
     if args.suite == "records":
