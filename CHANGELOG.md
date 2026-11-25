@@ -4,6 +4,8 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [SemVer](https://semver.org/)。
 
+## [0.6.0]（开发中）
+
 ## [0.5.0]（未发布）
 
 - 内置 Agent Skill 可跨会话复用工程内的玩法路线，记录待答问题、吸收用户纠正，并在复验后提升为已验证经验；无需新增 Bridge 能力。
