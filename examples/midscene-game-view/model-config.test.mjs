@@ -22,8 +22,9 @@ async function setup(t) {
   return { home, file };
 }
 
-test("uses the UnityRunBridge home with explicit configuration ahead of legacy environment", async (t) => {
-  const { home, file } = await setup(t);
+test("reads an existing strict JSON file ahead of legacy environment variables", async (t) => {
+  const { home } = await setup(t);
+  const file = modelConfigPath(home, true);
   assert.equal(file, join(home, ".unity-agent-bridge/plugins/midscene.json"));
   await writeFile(file, JSON.stringify(fixture));
   const env = { VISION_API_KEY: "dummy-key", MIDSCENE_MODEL_NAME: "legacy" };
@@ -40,6 +41,36 @@ test("uses the UnityRunBridge home with explicit configuration ahead of legacy e
   assert.deepEqual(env, { VISION_API_KEY: "dummy-key", MIDSCENE_MODEL_NAME: "legacy" });
 });
 
+test("loads comments in JSONC but preserves comment-like characters inside strings", async (t) => {
+  const { home, file } = await setup(t);
+  assert.equal(file, join(home, ".unity-agent-bridge/plugins/midscene.jsonc"));
+  const modelName = 'vision/*literal*/-"//text"';
+  await writeFile(file, '// User configuration\n' +
+    JSON.stringify({ ...fixture, modelName }, null, 2)
+      .replace('"apiKeyEnv"', '/* env name, not the key */ "apiKeyEnv"'));
+  const { modelConfig, path } = await loadModelConfig({ home, env: { VISION_API_KEY: "dummy-key" } });
+  assert.equal(path, file);
+  assert.equal(modelConfig.MIDSCENE_MODEL_BASE_URL, fixture.baseUrl);
+  assert.equal(modelConfig.MIDSCENE_MODEL_NAME, modelName);
+});
+
+test("rejects dual files before parsing or falling back to environment", async (t) => {
+  const { home, file } = await setup(t);
+  await writeFile(file, 'unreadable config');
+  await writeFile(modelConfigPath(home, true), JSON.stringify(fixture));
+  await assert.rejects(loadModelConfig({ home, env: { MIDSCENE_MODEL_NAME: "legacy" } }),
+    /midscene.jsonc 与 midscene.json 同时存在.*只保留其中一份/);
+});
+
+test("rejects malformed JSONC and does not accept comments in legacy JSON", async (t) => {
+  const { home, file } = await setup(t);
+  await writeFile(file, JSON.stringify(fixture) + " /* never closed");
+  await assert.rejects(loadModelConfig({ home, env: {} }), /不是有效的 JSONC/);
+  await rm(file);
+  await writeFile(modelConfigPath(home, true), "// not strict JSON\n" + JSON.stringify(fixture));
+  await assert.rejects(loadModelConfig({ home, env: {} }), /不是有效的 JSON：/);
+});
+
 test("preserves legacy environment configuration only when no managed file exists", async (t) => {
   const { home, file } = await setup(t);
   await assert.rejects(loadModelConfig({ home, env: {} }), /未配置 Midscene/);
@@ -48,7 +79,7 @@ test("preserves legacy environment configuration only when no managed file exist
     source: "environment", path: file, modelConfig: undefined,
   });
   await writeFile(file, "{ bad");
-  await assert.rejects(loadModelConfig({ home, env }), /不是有效的 JSON/);
+  await assert.rejects(loadModelConfig({ home, env }), /不是有效的 JSONC/);
 });
 
 test("rejects embedded credentials and a missing referenced key without exposing values", async (t) => {

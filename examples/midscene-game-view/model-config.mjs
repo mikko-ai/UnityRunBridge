@@ -1,9 +1,20 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseTree, stripComments } from "jsonc-parser";
 
-export function modelConfigPath(home = homedir()) {
-  return join(home, ".unity-agent-bridge", "plugins", "midscene.json");
+export function modelConfigPath(home = homedir(), legacy = false) {
+  return join(home, ".unity-agent-bridge", "plugins", legacy ? "midscene.json" : "midscene.jsonc");
+}
+
+async function configExists(path) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw new Error(`无法检查 Midscene 配置路径：${path}`);
+  }
 }
 
 const fields = ["baseUrl", "modelName", "modelFamily", "apiKeyEnv"];
@@ -12,21 +23,35 @@ const protocols = ["openai-chat", "openai-responses"];
 const responsesFamilies = ["gpt-5", "gpt-6"];
 
 export async function loadModelConfig({ home = homedir(), env = process.env } = {}) {
-  const path = modelConfigPath(home);
+  const jsonc = modelConfigPath(home);
+  const json = modelConfigPath(home, true);
+  const [hasJsonc, hasJson] = await Promise.all([configExists(jsonc), configExists(json)]);
+  if (hasJsonc && hasJson) {
+    throw new Error(`midscene.jsonc 与 midscene.json 同时存在，请在 ${join(home, ".unity-agent-bridge", "plugins")} 手动只保留其中一份`);
+  }
+  if (!hasJsonc && !hasJson) {
+    if (env.MIDSCENE_MODEL_NAME?.trim()) return { source: "environment", path: jsonc, modelConfig: undefined };
+    throw new Error(`未配置 Midscene：请创建 ${jsonc}，或设置 MIDSCENE_MODEL_NAME 等环境变量`);
+  }
+  const path = hasJsonc ? jsonc : json;
   let raw;
   try {
+    if (!(await stat(path)).isFile()) throw new Error();
     raw = await readFile(path, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw new Error(`无法读取 Midscene 配置：${path}`);
-    // Keep existing environment-based SDK settings when the managed file is absent.
-    if (env.MIDSCENE_MODEL_NAME?.trim()) return { source: "environment", path, modelConfig: undefined };
-    throw new Error(`未配置 Midscene：请创建 ${path}，或设置 MIDSCENE_MODEL_NAME 等环境变量`);
+  } catch {
+    throw new Error(`无法读取 Midscene 配置：${path}`);
   }
   let config;
   try {
-    config = JSON.parse(raw);
+    if (hasJsonc) {
+      const errors = [];
+      // Reject recovered documents; use JSON.parse for the resulting plain data object.
+      parseTree(raw, errors, { allowTrailingComma: false });
+      if (errors.length) throw new Error();
+    }
+    config = JSON.parse(hasJsonc ? stripComments(raw, " ") : raw);
   } catch {
-    throw new Error(`Midscene 配置不是有效的 JSON：${path}`);
+    throw new Error(`Midscene 配置不是有效的 ${hasJsonc ? "JSONC" : "JSON"}：${path}`);
   }
   if (!config || typeof config !== "object" || Array.isArray(config) ||
       Object.keys(config).some((key) => key !== "protocol" && !fields.includes(key)) ||
