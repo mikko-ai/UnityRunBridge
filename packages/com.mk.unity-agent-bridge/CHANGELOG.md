@@ -7,6 +7,7 @@
 ## [0.5.0]（未发布）
 
 - 可选 Midscene 插件支持 `~/.unity-agent-bridge/plugins/midscene.json` 用户级共享配置；可在本机检查配置，不需要启动 Unity 或调用模型。
+- 新增 `unityctl plugins init midscene`：从任意目录创建用户级 Midscene 配置模板，不覆盖已有配置、不读取模型密钥。
 
 ## [0.4.1]（已发布）
 

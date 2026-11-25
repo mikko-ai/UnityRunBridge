@@ -16,13 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout full history
+      - name: Checkout full history and release tags
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
-      - name: Verify versions and bump level
+      - name: Verify synchronized versions against the release batch
         run: python3 .github/scripts/check-version-policy.py --github-event "$GITHUB_EVENT_PATH"
 
   python:

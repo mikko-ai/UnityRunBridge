@@ -124,6 +124,7 @@ uv run unityctl --help
 | 命令 | 说明 |
 | --- | --- |
 | `init` | 初始化 `.unity-agent` 配置目录 |
+| `plugins init midscene` | 在任意目录初始化用户级 Midscene 配置模板，不覆盖已有配置 |
 | `config show` | 输出合并后的有效配置 |
 | `config validate` | 校验 `config.json` 与 `config.local.json` |
 | `config set-local KEY VALUE` | 更新本机配置字段 |
@@ -564,11 +565,11 @@ DIST_DIR="$REPO_ROOT/.tmp/release" scripts/package-upm.sh
 
 ### 发布流程
 
-**先升版，后发布。** 每次交付修复用 Patch，向后兼容的新功能用 Minor；同批修复加新功能用 Minor。纯文档、测试或 CI 改动无需升版。提交和 PR 使用 `fix:` 或 `feat:`（可加 scope）；日常 CI 校验这些变更的最低升版幅度，以及 CLI、UPM、Bridge 与锁文件的版本一致性。语义分类需要人工审阅。
+**按发布批次升版。** 以上一个正式 `vX.Y.Z` 标签为基线：整批只有修复用 Patch，有向后兼容的新功能用 Minor。同一候选阶段可以累计多个新命令或修复，只要候选版本已满足整批要求，就不重复升版。纯文档、测试或 CI 改动无需升版。提交和 PR 使用 `fix:` 或 `feat:`（可加 scope）；日常 CI 汇总未发布变更的最低升版要求并检查各组件的版本一致性。语义分类需要人工审阅。
 
 ```bash
-# 例如，0.4.0 上的修复升到 0.4.1；只同步版本字段，不打 tag
-bash scripts/sync-version.sh 0.4.1
+# 例如，正式版 0.4.1 之后的兼容新功能批次使用 0.5.0；不打 tag
+bash scripts/sync-version.sh 0.5.0
 ```
 
 同步后更新包内 [CHANGELOG.md](packages/com.mk.unity-agent-bridge/CHANGELOG.md)，验证后随改动一起提交。普通分支推送不发布。

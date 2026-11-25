@@ -53,6 +53,29 @@ def sha(value):
     return value
 
 
+def version_at(ref):
+    return parse_version(json.loads(git("show", f"{ref}:{MANIFEST}"))["version"])
+
+
+def latest_release_tag(base):
+    for tag in git("tag", "--merged", base, "--list", "v*", "--sort=-version:refname").splitlines():
+        if VERSION.fullmatch(tag[1:]):
+            return tag
+    return None
+
+
+def validate_batch(base, head, current, extra_messages=()):
+    # Keep the current candidate monotonic, but only bump once per release batch.
+    previous = version_at(base)
+    validate_bump(previous, current, 0)
+    tag = latest_release_tag(base)
+    start = tag or base
+    released = parse_version(tag[1:]) if tag else previous
+    messages = git("log", "-z", "--format=%B", f"{start}..{head}").split("\0")
+    validate_bump(released, current, required_bump([*messages, *extra_messages]))
+    return tag
+
+
 def read_versions():
     package = ROOT / "packages/com.mk.unity-agent-bridge"
     cli = ROOT / "src/unityctl"
@@ -72,7 +95,7 @@ def read_versions():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", type=sha, help="本地对比基线（使用完整 SHA）")
+    parser.add_argument("--base", type=sha, help="本地比较用的目标分支基线（使用完整 SHA）")
     parser.add_argument("--github-event", type=Path, help="GitHub 事件 JSON")
     args = parser.parse_args()
     try:
@@ -80,21 +103,20 @@ def main():
         current = parse_version(versions["UPM"])
         if any(value != versions["UPM"] for value in versions.values()):
             raise ValueError(f"组件版本不一致：{versions}")
-        base, head = args.base, git("rev-parse", "HEAD").strip()
+        head = git("rev-parse", "HEAD").strip()
+        base = args.base
         messages = []
         if args.github_event:
             event = json.loads(args.github_event.read_text(encoding="utf-8"))
             if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
                 pr = event["pull_request"]
-                base, head = sha(pr["base"]["sha"]), sha(pr["head"]["sha"])
+                # actions/checkout uses the test merge, including changes already on the target branch.
+                base = sha(pr["base"]["sha"])
                 messages.append(pr["title"])
             elif os.environ.get("GITHUB_EVENT_NAME") == "push":
                 base, head = sha(event["before"]), sha(event["after"])
-        if base and base != "0" * 40:
-            previous = parse_version(json.loads(git("show", f"{base}:{MANIFEST}"))["version"])
-            messages.extend(git("log", "-z", "--format=%B", f"{base}..{head}").split("\0"))
-            validate_bump(previous, current, required_bump(messages))
-        print(f"版本门禁通过：{versions['UPM']}")
+        tag = validate_batch(base if base and base != "0" * 40 else head, head, current, messages)
+        print(f"版本门禁通过：{versions['UPM']}（发布批次基线：{tag or '无正式标签，使用对比分支'}）")
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"版本门禁失败：{exc}\n")
 

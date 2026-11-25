@@ -22,11 +22,15 @@ unityctl --project "$UNITY_PROJECT" stop
 
 ## UnityRunBridge 用户级模型配置
 
-将以下 JSON 保存为 **`~/.unity-agent-bridge/plugins/midscene.json`**。模型地址、ID 和类型按 [模型服务商配置](https://www.midscenejs.com/model-api-setup) 填写。所有 Unity 工程复用这份文件；不在项目配置或 JSON 里存放 API Key。
+使用 **`unityctl 0.5.0+`**，在任意目录执行：
 
 ```bash
-mkdir -p "$HOME/.unity-agent-bridge/plugins"
+unityctl plugins init midscene
 ```
+
+它只在文件缺失时创建 **`~/.unity-agent-bridge/plugins/midscene.json`**，不会覆盖已有配置，也不需要 Unity 或 Node.js。所有 Unity 工程复用这份文件；不在项目配置或 JSON 里存放 API Key。
+
+编辑生成的模板，按 [模型服务商配置](https://www.midscenejs.com/model-api-setup) 填写地址、ID 和类型。例如：
 
 ```json
 {
@@ -39,7 +43,7 @@ mkdir -p "$HOME/.unity-agent-bridge/plugins"
 
 `apiKeyEnv` 是环境变量的**名字**。在启动命令的终端或密钥管理器中注入对应变量，再从本示例目录运行 `npm run model:check`。它只检查文件结构和密钥是否可读，不输出密钥、不启动 Unity，也不验证远端连通性。
 
-`smoke` 和仓库的 `run-unity-smoke.py model` 使用这份配置；文件不存在时兼容原有的 `MIDSCENE_*` 环境变量方式。有配置文件但无效时直接报错，不悄悄改用另一个模型。普通 `watch`、Scenario、UTF 和无模型报告不加载该文件；项目截图权限仍由各 Unity 工程管理。
+`smoke` 和仓库的 `run-unity-smoke.py model` 使用这份配置；文件不存在时兼容原有的 `MIDSCENE_*` 环境变量方式。一旦生成模板，需填完后才能使用；有配置文件但无效时直接报错，不悄悄改用另一个模型。普通 `watch`、Scenario、UTF 和无模型报告不加载该文件；项目截图权限仍由各 Unity 工程管理。
 
 ## 适用边界
 

@@ -69,6 +69,7 @@ from unityctl.skills import (
 )
 from unityctl.run_events import RunEvents
 from unityctl.run_records import RunRecordError, list_runs, show_run
+from unityctl.plugins import init_midscene_config
 from unityctl.watch import create_watch_server
 from unityctl.summary import build_summary, classify_log, load_log_rules, read_jsonl, write_summary
 
@@ -213,6 +214,11 @@ def build_parser() -> argparse.ArgumentParser:
             "（默认指向与 unityctl 版本一致的 upm tag）"
         ),
     )
+
+    plugins = subparsers.add_parser("plugins", help="管理用户级插件配置，不需要 Unity 工程")
+    plugin_commands = plugins.add_subparsers(dest="plugin_command", required=True)
+    plugin_init = plugin_commands.add_parser("init", help="仅创建缺失的插件配置模板，不覆盖已有文件")
+    plugin_init.add_argument("plugin", choices=("midscene",))
 
     config = subparsers.add_parser(
         "config",
@@ -1120,6 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
 def dispatch(args: argparse.Namespace) -> dict[str, Any]:
     handlers = {
         "init": cmd_init,
+        "plugins": cmd_plugins,
         "config": cmd_config,
         "status": cmd_status,
         "play": cmd_play,
@@ -1159,6 +1166,21 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
     if handler is None:
         raise CliError("not_found", f"unsupported command: {args.command}")
     return handler(args)
+
+
+def cmd_plugins(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        path, created = init_midscene_config(Path.home())
+    except (OSError, RuntimeError) as exc:
+        raise CliError("plugin_config_unwritable", f"无法初始化 Midscene 配置：{exc}") from exc
+    return {
+        "ok": True,
+        "code": "ok",
+        "plugin": args.plugin,
+        "created": created,
+        "configPath": str(path),
+        "message": "已创建模板，请填写 baseUrl、modelName 和 modelFamily" if created else "已保留现有配置",
+    }
 
 
 def cmd_init(args: argparse.Namespace) -> dict[str, Any]:
