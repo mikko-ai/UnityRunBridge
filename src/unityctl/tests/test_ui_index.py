@@ -208,3 +208,74 @@ def test_asset_artifact_symlink_outside_project_is_refused(project):
     artifact.symlink_to(outside)
     check_error("ui_index_path_invalid", ui_index.import_snapshot, project, ROOT, 0, {}, JOB, result)
     assert outside.read_text() == "must not be consumed"
+
+
+def test_runtime_prefab_click_sends_exact_identity_no_force_or_legacy_fallback(project, monkeypatch, capsys):
+    apply(project, [asset(controls=[control(), control(sibling=1)])])
+    selected = next(item for item in ui_index.find(project, ROOT)["controls"] if item["path"][0]["siblingIndex"] == 1)
+    calls = []
+
+    class Bridge:
+        def get_capabilities(self):
+            return {"capabilities": ["ui-index", "interaction"],
+                    "routes": [{"method": "POST", "path": "ui-index/click"}]}
+
+        def post(self, route, body):
+            calls.append((route, body))
+            return {"ok": False, "code": "occluded", "blockedBy": "Cover"}
+
+    monkeypatch.setattr(cli, "discover", lambda _: SimpleNamespace(base_url="unused", token="unused"))
+    monkeypatch.setattr(cli, "BridgeClient", lambda *_: Bridge())
+    argv = ["--project", str(project), "ui-index", "click", selected["id"], "--root", ROOT,
+            "--instance-root", "Canvas/Panel", "--scene", "Assets/Lab.unity"]
+    assert cli.main(argv) == 1
+    assert json.loads(capsys.readouterr().err)["blockedBy"] == "Cover"
+    (route, body), = calls
+    assert route == "ui-index/click"
+    assert body == {"binding": "prefab", "scene": "Assets/Lab.unity", "instanceRoot": "Canvas/Panel",
+                    "controlId": selected["id"], "relativePath": selected["path"], **{
+                        key: selected[key] for key in (
+                            "assetGuid", "assetPath", "sourceGuid", "localFileId",
+                            "fingerprint", "componentIndex", "componentType",
+                        )
+                    }}
+
+
+def test_runtime_old_bridge_or_missing_specific_route_does_not_post(project, monkeypatch, capsys):
+    class ReadOnlyIndexBridge:
+        def get_capabilities(self):
+            return {"capabilities": ["ui-index", "interaction"],
+                    "routes": [{"method": "POST", "path": "ui-index/scan"}]}
+
+        def post(self, *_):
+            pytest.fail("no fallback allowed")
+
+    monkeypatch.setattr(cli, "discover", lambda _: SimpleNamespace(base_url="unused", token="unused"))
+    monkeypatch.setattr(cli, "BridgeClient", lambda *_: ReadOnlyIndexBridge())
+    argv = ["--project", str(project), "ui-index", "click", "--runtime-token", "a" * 32,
+            "--scene", "Assets/Lab.unity"]
+    assert cli.main(argv) == 1
+    assert json.loads(capsys.readouterr().err)["code"] == "bridge_capability_missing"
+
+
+def test_runtime_dynamic_resolve_uses_fresh_hierarchy_evidence_without_cache(project, monkeypatch, capsys):
+    requests = []
+
+    class Bridge:
+        def get_capabilities(self):
+            return {"capabilities": ["ui-index"],
+                    "routes": [{"method": "POST", "path": "ui-index/resolve"}]}
+
+        def post(self, route, body):
+            requests.append((route, body))
+            return {"ok": True, "runtimeToken": "e" * 32}
+
+    monkeypatch.setattr(cli, "discover", lambda _: SimpleNamespace(base_url="unused", token="unused"))
+    monkeypatch.setattr(cli, "BridgeClient", lambda *_: Bridge())
+    argv = ["--project", str(project), "ui-index", "resolve", "--scene", "Assets/Lab.unity",
+            "--runtime-path", "Canvas/B", "--instance-id=-234"]
+    assert cli.main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["runtimeToken"] == "e" * 32
+    assert requests == [("ui-index/resolve", {"binding": "runtime", "scene": "Assets/Lab.unity",
+                                              "runtimePath": "Canvas/B", "instanceId": -234})]
+    assert not ui_index.cache_path(project).exists()

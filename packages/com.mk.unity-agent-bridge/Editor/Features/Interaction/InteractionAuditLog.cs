@@ -199,7 +199,7 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                 return;
             }
 
-            if (action == "click")
+            if (action == "click" || action == "ui-index-click")
             {
                 if (result.Ok)
                 {

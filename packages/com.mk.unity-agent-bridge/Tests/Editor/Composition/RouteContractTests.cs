@@ -49,6 +49,9 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
             ("GET", "profiling/status"),
             ("POST", "health/scan-prefabs"),
             ("POST", "ui-index/scan"),
+            ("POST", "ui-index/bind"),
+            ("POST", "ui-index/resolve"),
+            ("POST", "ui-index/click"),
             ("GET", "capabilities"),
         };
 
@@ -110,7 +113,7 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Contract
 
             IReadOnlyList<(string Method, string Path)> actual = RouteTable.ListRoutes();
 
-            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 35");
+            Assert.AreEqual(FullInstallRoutes.Length, actual.Count, "完整安装路由数应为 38");
             for (int i = 0; i < FullInstallRoutes.Length; i++)
             {
                 Assert.AreEqual(FullInstallRoutes[i].Method, actual[i].Method, $"route[{i}].method");

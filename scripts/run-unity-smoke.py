@@ -7,6 +7,7 @@ import math
 import os
 import shutil
 import socket
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -341,7 +342,7 @@ def run_locate_baseline(project, width, height):
     return all(group["n"] >= 20 for group in summary.values())
 
 
-def run_ui_index(base, unity, upm=None):
+def run_ui_index(base, unity, upm=None, expected_legacy=False):
     project = project_at(base, "ui-index", {
         "com.mk.unity-agent-bridge": f"file:{upm or BRIDGE}", "com.unity.ugui": "1.0.0",
     })
@@ -361,6 +362,14 @@ def run_ui_index(base, unity, upm=None):
         if upm:
             lock = json.loads((project / "Packages/packages-lock.json").read_text())
             assert lock["dependencies"]["com.mk.unity-agent-bridge"]["source"] == "local-tarball"
+        if expected_legacy:
+            assert cli(project, "status")["bridgeVersion"].startswith("0.4.")
+            cli(project, "ui-index", "sync", expected="bridge_capability_missing", save="legacy-index-sync.json")
+            cli(project, "ui-index", "click", "--scene", "Assets/Scenes/Unused.unity",
+                "--runtime-token", "0" * 32, expected="bridge_capability_missing", save="legacy-index-click.json")
+            assert not (project / "Library/UnityRunBridge/ui-index.sqlite3").exists()
+            print("Legacy Unity Bridge: scan/click refused without fallback", flush=True)
+            return
         files = [project / name for name in (
             "Assets/Menu/Menu.prefab", "Assets/Menu/Menu.prefab.meta",
             "Packages/manifest.json", "Packages/packages-lock.json", "ProjectSettings/ProjectVersion.txt",
@@ -393,6 +402,123 @@ def run_ui_index(base, unity, upm=None):
     saved, = found["controls"]
     assert saved["id"] == item["id"] and not found["liveVerified"] and not saved["annotation"]["stale"], found
     print(f"UI index: cold/warm/full, offline alias and read-only asset files verified ({project})", flush=True)
+
+
+def run_indexed_click(base, unity, upm=None):
+    project = project_at(base, "ui-index-click", {
+        "com.mk.unity-agent-bridge": f"file:{upm or BRIDGE}", "com.unity.ugui": "1.0.0",
+    })
+    (project / "Assets/Editor").mkdir()
+    (project / "Assets/Scenes").mkdir()
+    for name in ("PrepareGameView.cs", "PrepareUiIndexRuntime.cs"):
+        shutil.copyfile(FIXTURES / name, project / "Assets/Editor" / name)
+    shutil.copyfile(FIXTURES / "UiIndexFixtureProbe.cs", project / "Assets/UiIndexFixtureProbe.cs")
+    shutil.copyfile(ROOT / "examples/verification/ui/UiReviewDemo.cs", project / "Assets/UiReviewDemo.cs")
+    (project / "game-view-size.txt").write_text("640x360")
+    probe_name = "UiIndexFixtureProbe.Control"
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        write_json(project / ".unity-agent/config.json", {
+            "version": 1, "bridge": {"preferredPort": probe.getsockname()[1]},
+            "gameplay": {"enabled": True, "whitelist": [probe_name]},
+        })
+    editor = subprocess.Popen([str(unity), "-projectPath", str(project), "-logFile", str(project / "editor.log"),
+                               "-executeMethod", "PrepareUiIndexRuntime.Setup"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    scene = "Assets/Scenes/Indexed.unity"
+    try:
+        wait_for_editor(project, editor, "indexed-click 640x360")
+        checked = cli(project, "ui-index", "sync", "--root", "Assets/Menu")
+        assert checked["prefabs"] == 1 and checked["controlsScanned"] == 2, checked
+        both = cli(project, "ui-index", "find", "--root", "Assets/Menu", "Action")
+        assert both["ambiguous"], both
+        target, = [item for item in both["controls"] if item["path"][0]["siblingIndex"] == 0]
+        target_args = (target["id"], "--root", "Assets/Menu")
+        scope = ("--instance-root", "UiCanvas/Panel", "--scene", scene)
+        write_json(project / "ui-index-click-target.json", target)
+
+        bound = cli(project, "ui-index", "bind", *target_args, *scope, save="indexed-bound.json")
+        assert bound["bound"] and not bound["liveVerified"], bound
+        # The target is a real scene-linked prefab instance, not a name-only lookalike.
+        started = cli(project, "play", "--scene", scene, "--session", "indexed-click")
+        session = Path(started["sessionPath"])
+        expected = []
+        responses = []
+        def probe(action):
+            return cli(project, "gameplay", "invoke", probe_name,
+                       "--args", json.dumps({"action": action}))["result"]
+        def attempt(args, code="ok"):
+            result = cli(project, "ui-index", "click", *args, expected=code)
+            expected.append(code)
+            responses.append(result)
+            return result
+        try:
+            identified = cli(project, "ui-index", "resolve", *target_args, *scope)
+            assert identified["resolvedPath"] == "UiCanvas/Panel/Action[0]", identified
+            assert identified["liveVerified"] and not identified["clickabilityVerified"], identified
+            assert probe("counts") == "0:0"
+            actual = attempt((*target_args, *scope))
+            assert actual["clicked"] == identified["resolvedPath"] and not actual["forced"], actual
+            assert "pointerClick" in actual["events"] and actual["screenPoint"]["width"] > 0, actual
+            assert probe("counts") == "1:0"
+
+            for change, code in (
+                ("clone", "ui_index_ambiguous"), ("rename", "ui_index_stale"),
+                ("reorder", "ui_index_source_mismatch"), ("cover", "occluded"),
+                ("disabled", "not_interactable"), ("inactive", "ui_index_handler_mismatch"),
+            ):
+                probe(change)
+                attempt((*target_args, *scope), code)
+                assert probe("counts") == "1:0", change
+                probe("remove-clone" if change == "clone" else "restore")
+            probe("replace-root")
+            attempt((*target_args, *scope), "ui_index_source_mismatch")
+            assert probe("counts") == "1:0"
+            probe("restore-root")
+            probe("no-source")
+            attempt((*target_args, "--instance-root", "UiCanvas/RuntimeClone", "--scene", scene),
+                    "ui_index_source_mismatch")
+            assert probe("counts") == "1:0"
+            probe("remove-clone")
+            attempt((*target_args, "--instance-root", "UiCanvas/Panel", "--scene", "Assets/Scenes/Other.unity"),
+                    "ui_index_scene_missing")
+            with sqlite3.connect(project / "Library/UnityRunBridge/ui-index.sqlite3") as conn:
+                conn.execute("UPDATE prefabs SET fingerprint=?", ("0" * 32,))
+            attempt((*target_args, *scope), "ui_index_stale")
+            assert probe("counts") == "1:0"
+
+            found = cli(project, "hierarchy", "find", "--name", "Dynamic", "--active-only")
+            dynamic, = found["nodes"]
+            witness = cli(project, "ui-index", "resolve", "--scene", scene, "--runtime-path", dynamic["path"],
+                          f"--instance-id={dynamic['instanceId']}")
+            dynamic_args = ("--scene", scene, "--runtime-token", witness["runtimeToken"])
+            assert attempt(dynamic_args)["clicked"] == "UiCanvas/Dynamic"
+            attempt(dynamic_args, "ui_index_witness_expired")
+            assert probe("counts") == "2:0"
+            witness = cli(project, "ui-index", "resolve", "--scene", scene, "--runtime-path", dynamic["path"],
+                          f"--instance-id={dynamic['instanceId']}")
+            probe("rename-dynamic")
+            attempt(("--scene", scene, "--runtime-token", witness["runtimeToken"]), "ui_index_stale")
+            assert probe("counts") == "2:0"
+            refound = cli(project, "hierarchy", "find", "--name", "DynamicChanged", "--active-only")
+            new_node, = refound["nodes"]
+            witness = cli(project, "ui-index", "resolve", "--scene", scene, "--runtime-path", new_node["path"],
+                          f"--instance-id={new_node['instanceId']}")
+            probe("switch-scene")
+            assert cli(project, "status")["activeScenePath"] == "Assets/Scenes/Other.unity"
+            attempt(("--scene", scene, "--runtime-token", witness["runtimeToken"]), "ui_index_scene_missing")
+        finally:
+            cli(project, "stop", "--latest")
+        audits = [json.loads(line) for line in (session / "artifacts/interaction-actions.jsonl").read_text().splitlines()]
+        audits = [entry for entry in audits if entry.get("action") == "ui-index-click"]
+        assert [entry["code"] for entry in audits] == expected, audits
+        assert all("runtimeToken" not in entry["request"] for entry in audits), audits
+        assert sum(entry["ok"] for entry in audits) == 2
+        write_json(project / "indexed-click-result.json", {"methods": expected, "responses": responses, "audits": audits,
+                                                          "expectedCallbacks": 2, "unexpectedCallbacks": 0})
+        print(f"Indexed click: {len(expected)} attempts; 2 intended callbacks, 0 unexpected ({project})", flush=True)
+    finally:
+        terminate(editor)
 
 
 def terminate(process):
@@ -576,9 +702,9 @@ def verify_run_index(work, unity, upm=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "ui-index", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "ui-index", "indexed-click", "indexed-legacy", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
-    parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，delivery 或 ui-index 使用")
+    parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，供分发和索引实测使用")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
     args = parser.parse_args()
@@ -598,7 +724,9 @@ def main():
             parser.error(config.stderr.strip() or "Midscene 配置检查失败")
     if args.suite == "delivery" and (not args.upm or args.upm.suffix != ".tgz" or not args.upm.is_file()):
         parser.error("delivery requires --upm pointing to a local .tgz")
-    if args.suite == "ui-index" and args.upm and (args.upm.suffix != ".tgz" or not args.upm.is_file()):
+    if args.suite == "indexed-legacy" and not args.upm:
+        parser.error("indexed-legacy requires a local 0.4.x UPM tarball")
+    if args.suite in {"ui-index", "indexed-click", "indexed-legacy"} and args.upm and (args.upm.suffix != ".tgz" or not args.upm.is_file()):
         parser.error("ui-index requires --upm pointing to a local .tgz")
     unity = args.unity
     if unity and unity.suffix == ".app":
@@ -621,8 +749,11 @@ def main():
         assert all(adequate_samples), "insufficient successful samples; see both layout reports"
     if args.suite in {"watch", "all"}:
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
-    if args.suite == "ui-index":
-        run_ui_index(work, unity.resolve(), args.upm.resolve() if args.upm else None)
+    if args.suite in {"ui-index", "indexed-legacy"}:
+        run_ui_index(work, unity.resolve(), args.upm.resolve() if args.upm else None,
+                     expected_legacy=args.suite == "indexed-legacy")
+    if args.suite == "indexed-click":
+        run_indexed_click(work, unity.resolve(), args.upm.resolve() if args.upm else None)
     if args.suite == "records":
         verify_run_index(work, unity.resolve())
     if args.suite == "delivery":

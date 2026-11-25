@@ -1792,6 +1792,18 @@ def cmd_ui_index(args: argparse.Namespace) -> dict[str, Any]:
         if args.ui_index_action == "annotate":
             return ui_index.annotate(project, root, args.control_id, args.alias,
                                      args.purpose, args.origin, args.evidence)
+        if args.ui_index_action in {"bind", "resolve", "click"}:
+            route = f"ui-index/{args.ui_index_action}"
+            info = discover(project)
+            client = BridgeClient(info.base_url, info.token)
+            require_bridge_route(client, "ui-index", "POST", route)
+            request = ui_index.runtime_binding(project, root, args)
+            reply = client.post(route, request)
+            if not reply.get("ok"):
+                raise CliError(reply.get("code", "ui_index_runtime_failed"),
+                               reply.get("message", "运行态 UI 定位失败"),
+                               {key: reply[key] for key in ("blockedBy",) if key in reply})
+            return reply
         if not math.isfinite(args.timeout) or not 0 < args.timeout <= 900:
             raise CliError("invalid_argument", "UI 同步超时必须大于 0 且不超过 900 秒")
         revision, known = ui_index.snapshot(project, root)

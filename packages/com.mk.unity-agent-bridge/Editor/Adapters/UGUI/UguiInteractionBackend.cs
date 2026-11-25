@@ -11,9 +11,35 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
     /// UGUI 交互后端：射线验证 + StandaloneInputModule.ProcessMousePress 最小等价语义派发。
     /// 从旧 PointerSimulator 迁入。
     /// </summary>
-    internal sealed class UguiInteractionBackend : IInteractionBackend, ICoordinateClickBackend
+    internal sealed class UguiInteractionBackend : IInteractionBackend, ICoordinateClickBackend, IIndexedClickBackend
     {
-        public InteractionOperationResult Click(GameObject target, bool force)
+        public InteractionOperationResult Click(GameObject target, bool force) => ClickCore(target, force, null);
+
+        public Component UniqueClickHandler(GameObject target)
+        {
+            Component match = null;
+            if (target == null || !target.activeInHierarchy)
+                return null;
+            foreach (Component candidate in target.GetComponents<Component>())
+            {
+                if (!(candidate is IPointerClickHandler) ||
+                    candidate is Behaviour behaviour && !behaviour.isActiveAndEnabled)
+                    continue;
+                if (match != null)
+                    return null;
+                match = candidate;
+            }
+            return match;
+        }
+
+        public InteractionOperationResult ClickIndexed(Component expected)
+        {
+            if (expected == null || UniqueClickHandler(expected.gameObject) != expected)
+                return InteractionOperationResult.Fail("ui_index_handler_mismatch", "当前节点不能唯一匹配预期点击组件");
+            return ClickCore(expected.gameObject, false, expected);
+        }
+
+        private InteractionOperationResult ClickCore(GameObject target, bool force, Component expected)
         {
             if (EventSystem.current == null)
             {
@@ -38,6 +64,11 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
             }
 
             Vector2 screenPoint = rect.center;
+            if (expected != null && !(rect.width > 0 && rect.height > 0 && Screen.width > 0 && Screen.height > 0
+                && screenPoint.x >= 0 && screenPoint.x < Screen.width
+                && screenPoint.y >= 0 && screenPoint.y < Screen.height))
+                return InteractionOperationResult.Fail("ui_index_offscreen", "控件中心不在当前 Game View 屏幕内");
+
             PointerEventData pointerData = BuildPointerEventData(screenPoint);
 
             List<RaycastResult> raycastResults = new List<RaycastResult>();
@@ -81,6 +112,17 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                         $"命中链上没有找到 IPointerClickHandler（命中元素：{NodePath.BuildPath(hitObject.transform)}）");
                 }
 
+                if (expected != null)
+                {
+                    var raycast = raycastResults[0];
+                    var canvas = hitObject.GetComponentInParent<Canvas>();
+                    GameObject press = ExecuteEvents.GetEventHandler<IPointerDownHandler>(hitObject);
+                    if (!(raycast.module is GraphicRaycaster) || canvas == null || canvas.rootCanvas.targetDisplay != 0
+                        || (press != null && press != target))
+                        return InteractionOperationResult.Fail("ui_index_handler_mismatch",
+                            "最上层命中或 PointerDown 目标与索引控件不符");
+                }
+
                 if (!UguiGeometry.ComputeEffectiveInteractable(target))
                 {
                     return InteractionOperationResult.Fail(
@@ -90,7 +132,10 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 dispatchRoot = hitObject;
             }
 
-            return DispatchClick(dispatchRoot, target, hitObject, pointerData, force);
+            InteractionOperationResult dispatched = DispatchClick(dispatchRoot, target, hitObject, pointerData, force, expected);
+            if (!ReferenceEquals(expected, null) && !dispatched.Events.Contains("pointerClick"))
+                return InteractionOperationResult.Fail("click_not_dispatched", "目标在派发期间改变或未收到 pointerClick，请重新观察");
+            return dispatched;
         }
 
         public InteractionOperationResult ClickAt(Vector2 screenPoint)
@@ -130,8 +175,9 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 : InteractionOperationResult.Fail("click_not_dispatched", "指针事件已处理，但目标未收到 pointerClick");
         }
 
-        private static InteractionOperationResult DispatchClick(
-            GameObject dispatchRoot, GameObject target, GameObject hitObject, PointerEventData pointerData, bool force)
+        private InteractionOperationResult DispatchClick(
+            GameObject dispatchRoot, GameObject target, GameObject hitObject, PointerEventData pointerData,
+            bool force, Component expected = null)
         {
             pointerData.eligibleForClick = true;
             List<string> events = new List<string>();
@@ -139,15 +185,23 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
             ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerEnterHandler);
             events.Add("pointerEnter");
 
-            GameObject downHandlerGo = ExecuteEvents.ExecuteHierarchy(
-                dispatchRoot, pointerData, ExecuteEvents.pointerDownHandler);
+            // Indexed clicks never switch responders if a hover listener changes the UI.
+            bool indexed = !ReferenceEquals(expected, null);
+            var press = indexed ? ExecuteEvents.GetEventHandler<IPointerDownHandler>(dispatchRoot) : null;
+            GameObject downHandlerGo = !indexed || (target != null && expected != null
+                && UniqueClickHandler(target) == expected && (press == null || press == target))
+                ? ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerDownHandler)
+                : null;
             if (downHandlerGo != null)
             {
                 events.Add("pointerDown");
             }
-            else
+            else if (!indexed || (target != null && expected != null && UniqueClickHandler(target) == expected
+                    && (press == null || press == target)))
             {
                 downHandlerGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(dispatchRoot);
+                if (indexed && downHandlerGo != target)
+                    downHandlerGo = null;
             }
 
             pointerData.pointerPress = downHandlerGo;
@@ -158,8 +212,10 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 events.Add("pointerUp");
 
                 GameObject clickAtUpGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(dispatchRoot);
-                if (clickAtUpGo == downHandlerGo &&
-                    ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerClickHandler))
+                if (clickAtUpGo == downHandlerGo
+                    && (!indexed || (downHandlerGo == target && expected != null
+                        && UniqueClickHandler(target) == expected && UguiGeometry.ComputeEffectiveInteractable(target)))
+                    && ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerClickHandler))
                 {
                     events.Add("pointerClick");
                 }

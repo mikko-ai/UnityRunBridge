@@ -62,6 +62,57 @@ def add_parser(subparsers, add_project_option):
     annotate.add_argument("--purpose", required=True)
     annotate.add_argument("--origin", choices=("source-inference", "user-confirmed", "runtime-verified"), required=True)
     annotate.add_argument("--evidence", required=True)
+    for verb, help_text in (("bind", "Edit Mode 核验已保存的场景实例来源"),
+                            ("resolve", "只读核验当前运行态身份"),
+                            ("click", "同一请求内核验并非强制点击")):
+        runtime = actions.add_parser(verb, help=help_text)
+        runtime.add_argument("control_id", **({} if verb == "bind" else {"nargs": "?"}))
+        runtime.add_argument("--scene", required=True, help="当前加载的完整 .unity 资源路径")
+        runtime.add_argument("--root", default="Assets", help="Prefab 缓存范围")
+        runtime.add_argument("--instance-root", help="唯一的运行态 Prefab 根层级路径")
+        if verb == "resolve":
+            runtime.add_argument("--runtime-path", help="动态节点：当前 Hierarchy 的精确路径")
+            runtime.add_argument("--instance-id", type=int, help="动态节点：当前 Hierarchy 的实例 ID")
+        elif verb == "click":
+            runtime.add_argument("--runtime-token", help="动态节点：resolve 签发的一次性凭证")
+
+
+def runtime_binding(project, root, args):
+    if not args.scene.endswith(".unity") or not 0 < len(args.scene) <= 1024:
+        raise UiIndexError("invalid_argument", "需要完整场景资源路径，例如 Assets/Scenes/Demo.unity")
+    request = {"scene": args.scene}
+    runtime_path = getattr(args, "runtime_path", None)
+    instance_id = getattr(args, "instance_id", None)
+    token = getattr(args, "runtime_token", None)
+    if args.control_id is not None:
+        if not args.instance_root or runtime_path is not None or instance_id is not None or token is not None:
+            raise UiIndexError("invalid_argument", "Prefab 控件需要 --instance-root，不能混用动态绑定")
+        controls = find(project, root, control_id=args.control_id, limit=1)["controls"]
+        if not controls:
+            raise UiIndexError("ui_index_control_missing", "本目录没有该静态控件 ID")
+        control = controls[0]
+        if not control["sourceGuid"] or not control["localFileId"] or not control["pointerClickHandler"]:
+            raise UiIndexError("ui_index_source_unverified", "静态记录无法证明点击身份，请先从 Hierarchy 观察")
+        request.update({"binding": "prefab", "controlId": control["id"], "instanceRoot": args.instance_root,
+                        "relativePath": control["path"]})
+        request.update({key: control[key] for key in (
+            "assetGuid", "assetPath", "fingerprint", "sourceGuid", "localFileId",
+            "componentType", "componentIndex",
+        )})
+        return request
+
+    if args.instance_root:
+        raise UiIndexError("invalid_argument", "动态绑定不使用 --instance-root")
+    request["binding"] = "runtime"
+    if args.ui_index_action == "resolve":
+        if not runtime_path or instance_id is None or not (-(2**31) <= instance_id < 2**31) or instance_id == 0:
+            raise UiIndexError("invalid_argument", "动态核验需提供 --runtime-path 与当前 --instance-id")
+        request.update({"runtimePath": runtime_path, "instanceId": instance_id})
+    else:
+        if token is None or not HEX32.fullmatch(token):
+            raise UiIndexError("invalid_argument", "动态点击需要刚刚 resolve 得到的 --runtime-token")
+        request["runtimeToken"] = token
+    return request
 
 
 def validate_root(root: str) -> str:
