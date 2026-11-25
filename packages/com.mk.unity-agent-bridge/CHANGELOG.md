@@ -7,6 +7,7 @@
 ## [0.6.0]（开发中）
 
 - UGUI Bridge 可按目录增量抽取 Prefab 控件和持久回调线索；仅空闲 Edit Mode，读取导入资产，不执行回调。
+- 新增 `unityctl ui-index sync/find/annotate`：事务更新工程本地 SQLite、离线发现控件，将用途与证据保存在独立注释库。
 
 ## [0.5.0]（未发布）
 

@@ -341,6 +341,60 @@ def run_locate_baseline(project, width, height):
     return all(group["n"] >= 20 for group in summary.values())
 
 
+def run_ui_index(base, unity, upm=None):
+    project = project_at(base, "ui-index", {
+        "com.mk.unity-agent-bridge": f"file:{upm or BRIDGE}", "com.unity.ugui": "1.0.0",
+    })
+    config = project / ".unity-agent/config.json"
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        write_json(config, {"version": 1, "bridge": {"preferredPort": probe.getsockname()[1]}})
+    write_json(project / ".unity-agent/config.local.json", {"unityExecutablePath": str(unity)})
+    folder = project / "Assets/Editor"
+    folder.mkdir()
+    shutil.copyfile(FIXTURES / "PrepareUiIndex.cs", folder / "PrepareUiIndex.cs")
+    editor = subprocess.Popen([str(unity), "-batchmode", "-nographics", "-projectPath", str(project),
+                               "-logFile", str(project / "editor.log"), "-executeMethod", "PrepareUiIndex.Setup"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for_editor(project, editor, "UI index fixture")
+        if upm:
+            lock = json.loads((project / "Packages/packages-lock.json").read_text())
+            assert lock["dependencies"]["com.mk.unity-agent-bridge"]["source"] == "local-tarball"
+        files = [project / name for name in (
+            "Assets/Menu/Menu.prefab", "Assets/Menu/Menu.prefab.meta",
+            "Packages/manifest.json", "Packages/packages-lock.json", "ProjectSettings/ProjectVersion.txt",
+        )]
+        before = [path.read_bytes() for path in files]
+        cli(project, "skills", "init")
+        doctor = cli(project, "doctor", "--require-route", "POST", "ui-index/scan", save="ui-index-doctor.json")
+        assert doctor["versions"]["loadedBridgeVersion"] == "0.6.0", doctor
+        cold = cli(project, "ui-index", "sync", "--root", "Assets/Menu", save="ui-index-cold.json")
+        assert cold["scanned"] == cold["controlsScanned"] == 1, cold
+        warm = cli(project, "ui-index", "sync", "--root", "Assets/Menu", save="ui-index-warm.json")
+        assert warm["scanned"] == 0 and warm["unchanged"] == 1, warm
+        item, = cli(project, "ui-index", "find", "--root", "Assets/Menu", "Open Test",
+                    "--type", "Button", save="ui-index-found.json")["controls"]
+        assert item["assetPath"] == "Assets/Menu/Menu.prefab" and int(item["localFileId"]) != 0, item
+        cli(project, "ui-index", "annotate", "--root", "Assets/Menu", item["id"],
+            "--alias", "open-demo", "--purpose", "测试夹具入口", "--origin", "source-inference",
+            "--evidence", "PrepareUiIndex.Setup")
+        notes = (project / ".unity-agent/ui-index-annotations.sqlite3").read_bytes()
+        assert cli(project, "ui-index", "sync", "--root", "Assets/Menu", "--full")["scanned"] == 1
+        assert (project / ".unity-agent/ui-index-annotations.sqlite3").read_bytes() == notes
+        result_files = project / "Library/UnityRunBridge/ui-index-results"
+        assert not list(result_files.glob("*.jsonl")), result_files
+        assert [path.read_bytes() for path in files] == before
+    finally:
+        terminate(editor)
+
+    found = cli(project, "ui-index", "find", "--root", "Assets/Menu", "--alias", "OPEN-DEMO",
+                save="ui-index-offline.json")
+    saved, = found["controls"]
+    assert saved["id"] == item["id"] and not found["liveVerified"] and not saved["annotation"]["stale"], found
+    print(f"UI index: cold/warm/full, offline alias and read-only asset files verified ({project})", flush=True)
+
+
 def terminate(process):
     if process.poll() is None:
         process.terminate()
@@ -522,9 +576,9 @@ def verify_run_index(work, unity, upm=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "all"))
+    parser.add_argument("suite", choices=("utf", "visual", "watch", "records", "delivery", "model", "locate-baseline", "ui-index", "all"))
     parser.add_argument("--allow-model-requests", action="store_true", help="仅用于 model，确认允许发送演示画面")
-    parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，delivery 专用")
+    parser.add_argument("--upm", type=Path, help="本地 UPM .tgz，delivery 或 ui-index 使用")
     parser.add_argument("--unity", type=Path, default=os.environ.get("UNITY_BIN"))
     parser.add_argument("--output", type=Path, default=ROOT / ".tmp" / "unity-smoke")
     args = parser.parse_args()
@@ -544,6 +598,8 @@ def main():
             parser.error(config.stderr.strip() or "Midscene 配置检查失败")
     if args.suite == "delivery" and (not args.upm or args.upm.suffix != ".tgz" or not args.upm.is_file()):
         parser.error("delivery requires --upm pointing to a local .tgz")
+    if args.suite == "ui-index" and args.upm and (args.upm.suffix != ".tgz" or not args.upm.is_file()):
+        parser.error("ui-index requires --upm pointing to a local .tgz")
     unity = args.unity
     if unity and unity.suffix == ".app":
         unity /= "Contents/MacOS/Unity"
@@ -565,6 +621,8 @@ def main():
         assert all(adequate_samples), "insufficient successful samples; see both layout reports"
     if args.suite in {"watch", "all"}:
         run_visual(work / "observe", unity.resolve(), 1280, 720, watch=True)
+    if args.suite == "ui-index":
+        run_ui_index(work, unity.resolve(), args.upm.resolve() if args.upm else None)
     if args.suite == "records":
         verify_run_index(work, unity.resolve())
     if args.suite == "delivery":

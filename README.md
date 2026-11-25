@@ -445,6 +445,8 @@ skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的
 
 内置 Skill 的触发范围可用[中英双语触发评测](evals/README.md)检查。离线自检随 Python 测试运行；盲评可独立导出与评分。
 
+使用 [UI 索引](docs/unityctl-ui-index.md)可增量同步 UGUI Prefab、离线查找候选控件，以及单独记录用途和证据。
+
 ## 让 Agent 逐步学会玩法
 
 运行、截图与 Watch 回答「这次发生了什么」，玩法知识回答「下次该怎么做」。可以对 Agent 说：

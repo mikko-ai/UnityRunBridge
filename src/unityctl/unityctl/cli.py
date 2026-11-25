@@ -1,12 +1,13 @@
 import argparse
 import json
+import math
 import sys
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from unityctl import __version__, agent_run
+from unityctl import __version__, agent_run, ui_index
 from unityctl.utf import UtfError, read_test_job, run_tests
 from unityctl.build import BuildError, run_build
 from unityctl.build_size import analyze_build_size
@@ -582,6 +583,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="compilation 检查等待编译完成、missing_scripts 检查等待 prefab 扫描 job 完成的超时时间（秒）",
     )
+
+    ui_index.add_parser(subparsers, _add_project_option)
 
     hierarchy = subparsers.add_parser(
         "hierarchy",
@@ -1164,6 +1167,7 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         "runs": cmd_runs,
         "build-size": cmd_build_size,
         "health": cmd_health,
+        "ui-index": cmd_ui_index,
         "hierarchy": cmd_hierarchy,
         "snapshot": cmd_snapshot,
         "hit-test": cmd_hit_test,
@@ -1776,6 +1780,45 @@ def cmd_hierarchy(args: argparse.Namespace) -> dict[str, Any]:
         return client.hierarchy_inspect(path=args.path, scene=args.scene)
 
     raise CliError("not_found", f"unsupported hierarchy command: {args.hierarchy_command}")
+
+
+def cmd_ui_index(args: argparse.Namespace) -> dict[str, Any]:
+    project = find_unity_project_root(args.project_path or Path.cwd())
+    try:
+        root = ui_index.validate_root(args.root)
+        if args.ui_index_action == "find":
+            return ui_index.find(project, root, args.query, args.component_type,
+                                 args.alias, args.control_id, args.limit)
+        if args.ui_index_action == "annotate":
+            return ui_index.annotate(project, root, args.control_id, args.alias,
+                                     args.purpose, args.origin, args.evidence)
+        if not math.isfinite(args.timeout) or not 0 < args.timeout <= 900:
+            raise CliError("invalid_argument", "UI 同步超时必须大于 0 且不超过 900 秒")
+        revision, known = ui_index.snapshot(project, root)
+        if args.full:
+            known = {}
+        info = discover(project)
+        client = BridgeClient(info.base_url, info.token)
+        require_bridge_route(client, "ui-index", "POST", "ui-index/scan")
+        reply = client.post("ui-index/scan", {"root": root, "known": known})
+        if not reply.get("ok"):
+            raise CliError(reply.get("code", "ui_index_scan_failed"),
+                           reply.get("message", "无法启动 UI Prefab 扫描"))
+        job_id = reply.get("jobId")
+        if not isinstance(job_id, str) or not ui_index.JOB_ID.fullmatch(job_id):
+            raise CliError("ui_index_scan_invalid", "Bridge 返回无效的扫描任务 ID")
+        job = wait_for_job(project, job_id, timeout_seconds=args.timeout, initial_info=info)
+        return ui_index.import_snapshot(project, root, revision, known, job_id, job.get("result"))
+    except ui_index.UiIndexError as exc:
+        raise CliError(exc.code, str(exc)) from exc
+    except JobFailed as exc:
+        raise CliError(exc.job.get("errorCode") or "ui_index_scan_failed", str(exc)) from exc
+    except JobTimeout as exc:
+        raise CliError("timeout", str(exc)) from exc
+    except JobEditorExited as exc:
+        raise CliError("editor_exited", str(exc)) from exc
+    except OSError as exc:
+        raise CliError("ui_index_io_error", str(exc)) from exc
 
 
 def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:

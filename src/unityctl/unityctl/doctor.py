@@ -13,7 +13,7 @@ from unityctl.config import (
 from unityctl.skills import SKILL_FILENAME, read_skill_version, resolve_skills_dir
 
 _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?")
-_UGUI_CAPABILITIES = {"interaction", "recording"}
+_UGUI_CAPABILITIES = {"interaction", "recording", "ui-index"}
 
 
 def project_version_report(project: Path | None, skills_target: str | None) -> tuple[dict, list[dict]]:
