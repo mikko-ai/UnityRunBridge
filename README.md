@@ -564,23 +564,18 @@ DIST_DIR="$REPO_ROOT/.tmp/release" scripts/package-upm.sh
 
 ### 发布流程
 
-1. 在 `main` 分支执行版本升级脚本（会同步更新 Unity 包与 Python 工具版本、commit 并打 tag）：
+**先升版，后发布。** 每次交付修复用 Patch，向后兼容的新功能用 Minor；同批修复加新功能用 Minor。纯文档、测试或 CI 改动无需升版。提交和 PR 使用 `fix:` 或 `feat:`（可加 scope）；日常 CI 校验这些变更的最低升版幅度，以及 CLI、UPM、Bridge 与锁文件的版本一致性。语义分类需要人工审阅。
 
 ```bash
-scripts/bump-version.sh patch
-# 或 minor / major
-# 仅本地完成、不 push：scripts/bump-version.sh patch --no-push
+# 例如，0.4.0 上的修复升到 0.4.1；只同步版本字段，不打 tag
+bash scripts/sync-version.sh 0.4.1
 ```
 
-   打 tag 前脚本会先在本地跑一遍全量测试（`scripts/run-full-tests.sh`：Python
-   单测 + Unity EditMode 全量矩阵，9 种 UGUI/TMP/InputSystem 组合），失败则中止、
-   不创建 commit/tag。这一步需要本机装有对应版本的 Unity Editor
-   （`UNITY_BIN` 默认指向 `/Applications/Unity/Hub/Editor/2022.3.62f2/...`）并已
-   激活 license；如需跳过，传 `--skip-full-tests`（会要求额外输入 `SKIP` 二次确认，
-   不会静默跳过）。
+同步后更新包内 [CHANGELOG.md](packages/com.mk.unity-agent-bridge/CHANGELOG.md)，验证后随改动一起提交。普通分支推送不发布。
 
-2. 脚本默认 push `main` 与 `vX.Y.Z` tag；GitHub Actions（`release.yml`，跑在 GitHub
-   托管 runner 上，不依赖任何 self-hosted 机器）会自动：
+1. **已升版的候选**：确认对应提交在 `origin/main`，检查 CI，并在本机运行 `bash scripts/run-full-tests.sh`（Python + Unity 2022.3.62f2 的 9 种 EditMode 组合）。全量通过、得到明确发布授权后，为**已验收的提交**创建并推送同版本的 `vX.Y.Z` 标签。不要再次运行 `bump-version.sh`，否则会再升一次。
+2. **尚未升版且已获得发布授权**：`scripts/bump-version.sh patch|minor|major` 可合并执行升版、测试和打标签；默认也会推送。`--no-push` 仍会创建本地标签，不适用于仅准备候选的场景。
+3. 推送 `vX.Y.Z` 标签后，[Release 工作流](.github/workflows/release.yml) 会在 GitHub 托管 Runner 上自动：
    - 校验 tag 位于 `main` 历史上
    - 校验 tag 与 `package.json` / `pyproject.toml` / `__init__.py` 版本一致
    - 运行 Python 测试
