@@ -25,6 +25,12 @@ namespace Mk.UnityAgentBridge.Editor
         {
             services.TryGet(out IUiPrefabIndexer indexer);
             routes.Map("POST", "ui-index/scan", ctx => UiIndexScan.Begin((BridgeRequestContext)ctx, indexer));
+            if (services.TryGet(out IIndexedClickBackend clickBackend))
+            {
+                routes.Map("POST", "ui-index/bind", ctx => UiIndexRuntime.Bind((BridgeRequestContext)ctx));
+                routes.Map("POST", "ui-index/resolve", ctx => UiIndexRuntime.Execute((BridgeRequestContext)ctx, clickBackend, false));
+                routes.Map("POST", "ui-index/click", ctx => UiIndexRuntime.Execute((BridgeRequestContext)ctx, clickBackend, true));
+            }
         }
     }
 
