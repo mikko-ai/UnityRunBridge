@@ -217,7 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     plugins = subparsers.add_parser("plugins", help="管理用户级插件配置，不需要 Unity 工程")
     plugin_commands = plugins.add_subparsers(dest="plugin_command", required=True)
-    plugin_init = plugin_commands.add_parser("init", help="仅创建缺失的插件配置模板，不覆盖已有文件")
+    plugin_init = plugin_commands.add_parser(
+        "init",
+        help="仅创建缺失的插件配置模板，不覆盖已有文件",
+        epilog="Midscene 的 protocol 可选：openai-chat（默认）或 openai-responses（gpt-5 / gpt-6）。",
+    )
     plugin_init.add_argument("plugin", choices=("midscene",))
 
     config = subparsers.add_parser(
@@ -1179,7 +1183,11 @@ def cmd_plugins(args: argparse.Namespace) -> dict[str, Any]:
         "plugin": args.plugin,
         "created": created,
         "configPath": str(path),
-        "message": "已创建模板，请填写 baseUrl、modelName 和 modelFamily" if created else "已保留现有配置",
+        "message": (
+            "已创建模板，请填写 baseUrl、modelName 和 modelFamily；"
+            "protocol 可选 openai-chat（默认）或 openai-responses"
+            if created else "已保留现有配置"
+        ),
     }
 
 

@@ -7,6 +7,7 @@ MIDSCENE_TEMPLATE = {
     "baseUrl": "",
     "modelName": "",
     "modelFamily": "",
+    "protocol": "openai-chat",
     "apiKeyEnv": "UNITY_BRIDGE_MIDSCENE_API_KEY",
 }
 

@@ -7,6 +7,9 @@ export function modelConfigPath(home = homedir()) {
 }
 
 const fields = ["baseUrl", "modelName", "modelFamily", "apiKeyEnv"];
+const protocols = ["openai-chat", "openai-responses"];
+// Keep in sync with the GPT adapters in the pinned Midscene SDK.
+const responsesFamilies = ["gpt-5", "gpt-6"];
 
 export async function loadModelConfig({ home = homedir(), env = process.env } = {}) {
   const path = modelConfigPath(home);
@@ -26,9 +29,17 @@ export async function loadModelConfig({ home = homedir(), env = process.env } = 
     throw new Error(`Midscene 配置不是有效的 JSON：${path}`);
   }
   if (!config || typeof config !== "object" || Array.isArray(config) ||
-      Object.keys(config).length !== fields.length ||
+      Object.keys(config).some((key) => key !== "protocol" && !fields.includes(key)) ||
       !fields.every((key) => typeof config[key] === "string" && config[key].trim())) {
-    throw new Error("Midscene 配置必须包含且仅包含 baseUrl、modelName、modelFamily、apiKeyEnv 四个非空字符串");
+    throw new Error("Midscene 配置必须包含 baseUrl、modelName、modelFamily、apiKeyEnv 四个非空字符串，仅可额外填写 protocol");
+  }
+  const protocol = Object.hasOwn(config, "protocol") ? config.protocol : "openai-chat";
+  if (!protocols.includes(protocol)) {
+    throw new Error("Midscene 的 protocol 只接受 openai-chat（默认）或 openai-responses");
+  }
+  const modelFamily = config.modelFamily.trim();
+  if (protocol === "openai-responses" && !responsesFamilies.includes(modelFamily)) {
+    throw new Error("当前 Midscene SDK 的 openai-responses 仅支持 gpt-5 或 gpt-6 类型");
   }
   let url;
   try {
@@ -38,6 +49,9 @@ export async function loadModelConfig({ home = homedir(), env = process.env } = 
   }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new Error("Midscene 的 baseUrl 必须是无凭据、查询参数和片段的 HTTP(S) API 地址");
+  }
+  if (/\/(?:chat\/completions|responses)\/*$/i.test(url.pathname)) {
+    throw new Error("Midscene 的 baseUrl 应填 API 前缀（如 https://gateway.example/v1），不要附加 /chat/completions 或 /responses");
   }
   const keyName = config.apiKeyEnv;
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName)) {
@@ -53,7 +67,8 @@ export async function loadModelConfig({ home = homedir(), env = process.env } = 
     modelConfig: {
       MIDSCENE_MODEL_BASE_URL: config.baseUrl.trim(),
       MIDSCENE_MODEL_NAME: config.modelName.trim(),
-      MIDSCENE_MODEL_FAMILY: config.modelFamily.trim(),
+      MIDSCENE_MODEL_FAMILY: modelFamily,
+      MIDSCENE_MODEL_PROTOCOL: protocol,
       MIDSCENE_MODEL_API_KEY: apiKey,
     },
   };

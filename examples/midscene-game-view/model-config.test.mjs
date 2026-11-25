@@ -34,6 +34,7 @@ test("uses the UnityRunBridge home with explicit configuration ahead of legacy e
       MIDSCENE_MODEL_NAME: fixture.modelName,
       MIDSCENE_MODEL_FAMILY: fixture.modelFamily,
       MIDSCENE_MODEL_API_KEY: "dummy-key",
+      MIDSCENE_MODEL_PROTOCOL: "openai-chat",
     },
   });
   assert.deepEqual(env, { VISION_API_KEY: "dummy-key", MIDSCENE_MODEL_NAME: "legacy" });
@@ -57,9 +58,36 @@ test("rejects embedded credentials and a missing referenced key without exposing
     error.message.includes("无凭据") && !error.message.includes("private"));
   await writeFile(file, JSON.stringify({ ...fixture, apiKey: "private" }));
   await assert.rejects(loadModelConfig({ home, env: {} }), (error) =>
-    error.message.includes("仅包含") && !error.message.includes("private"));
+    error.message.includes("仅可额外填写 protocol") && !error.message.includes("private"));
   await writeFile(file, JSON.stringify(fixture));
   await assert.rejects(loadModelConfig({ home, env: { MIDSCENE_MODEL_NAME: "legacy" } }), /环境变量未设置/);
+});
+
+test("validates the two protocol spellings and the pinned SDK's Responses model families", async (t) => {
+  const { home, file } = await setup(t);
+  const env = { VISION_API_KEY: "dummy-key" };
+  for (const protocol of ["responses", "OpenAI-Responses", "", null, 1]) {
+    await writeFile(file, JSON.stringify({ ...fixture, protocol }));
+    await assert.rejects(loadModelConfig({ home, env }), /openai-chat（默认）或 openai-responses/);
+  }
+  await writeFile(file, JSON.stringify({ ...fixture, protocol: "openai-responses" }));
+  await assert.rejects(loadModelConfig({ home, env }), /仅支持 gpt-5 或 gpt-6/);
+
+  for (const modelFamily of ["gpt-5", "gpt-6"]) {
+    await writeFile(file, JSON.stringify({ ...fixture, modelFamily, protocol: "openai-responses" }));
+    assert.equal((await loadModelConfig({ home, env })).modelConfig.MIDSCENE_MODEL_PROTOCOL, "openai-responses");
+  }
+});
+
+test("accepts provider prefixes but rejects complete API operation URLs", async (t) => {
+  const { home, file } = await setup(t);
+  const env = { VISION_API_KEY: "dummy-key" };
+  for (const path of ["/v1/chat/completions", "/v1/responses/"]) {
+    await writeFile(file, JSON.stringify({ ...fixture, baseUrl: "https://provider.example" + path }));
+    await assert.rejects(loadModelConfig({ home, env }), /应填 API 前缀/);
+  }
+  await writeFile(file, JSON.stringify({ ...fixture, baseUrl: "https://provider.example/api/v3", protocol: "openai-chat" }));
+  assert.equal((await loadModelConfig({ home, env })).modelConfig.MIDSCENE_MODEL_BASE_URL, "https://provider.example/api/v3");
 });
 
 test("the configuration check never prints the key or claims to connect", async (t) => {
@@ -70,6 +98,6 @@ test("the configuration check never prints the key or claims to connect", async 
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
-    ok: true, source: "unity-run-bridge", path: file, connectionTested: false,
+    ok: true, source: "unity-run-bridge", path: file, protocol: "openai-chat", connectionTested: false,
   });
 });

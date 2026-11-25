@@ -19,7 +19,8 @@ def test_plugins_init_creates_template_without_a_unity_project(monkeypatch, tmp_
     path = home / ".unity-agent-bridge/plugins/midscene.json"
     assert result["created"] is True and result["configPath"] == str(path)
     assert json.loads(path.read_text()) == {
-        "baseUrl": "", "modelName": "", "modelFamily": "", "apiKeyEnv": "UNITY_BRIDGE_MIDSCENE_API_KEY",
+        "baseUrl": "", "modelName": "", "modelFamily": "", "protocol": "openai-chat",
+        "apiKeyEnv": "UNITY_BRIDGE_MIDSCENE_API_KEY",
     }
     if os.name == "posix":
         assert stat.S_IMODE(path.stat().st_mode) == 0o600

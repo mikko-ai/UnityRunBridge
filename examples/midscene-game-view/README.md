@@ -37,11 +37,21 @@ unityctl plugins init midscene
   "baseUrl": "https://your-model-provider.example/v1",
   "modelName": "your-vision-model",
   "modelFamily": "qwen3-vl",
+  "protocol": "openai-chat",
   "apiKeyEnv": "UNITY_BRIDGE_MIDSCENE_API_KEY"
 }
 ```
 
-`apiKeyEnv` 是环境变量的**名字**。在启动命令的终端或密钥管理器中注入对应变量，再从本示例目录运行 `npm run model:check`。它只检查文件结构和密钥是否可读，不输出密钥、不启动 Unity，也不验证远端连通性。
+`protocol` 可省略，省略时使用 `openai-chat`。只接受下列两个值（区分大小写）：
+
+| 值 | 请求路径（追加到 `baseUrl`） | 何时使用 |
+| --- | --- | --- |
+| `openai-chat`（默认） | `/chat/completions` | 服务商提供 OpenAI Chat Completions。 |
+| `openai-responses` | `/responses` | 网关支持 Responses，且所选模型适用；本示例锁定的 Midscene SDK 仅允许 `gpt-5` / `gpt-6` 类型使用。 |
+
+`baseUrl` 填服务商的 API 前缀，如 `https://gateway.example/v1` 或 `https://gateway.example/api/v3`。不要把 `/chat/completions` 或 `/responses` 写进去。已有配置不用重建；需要切换时直接编辑 `protocol`。
+
+`apiKeyEnv` 是环境变量的**名字**。在启动命令的终端或密钥管理器中注入对应变量，再从本示例目录运行 `npm run model:check`。它会校验协议和配置，显示所选协议；不会输出密钥、启动 Unity 或验证远端连通性。
 
 `smoke` 和仓库的 `run-unity-smoke.py model` 使用这份配置；文件不存在时兼容原有的 `MIDSCENE_*` 环境变量方式。一旦生成模板，需填完后才能使用；有配置文件但无效时直接报错，不悄悄改用另一个模型。普通 `watch`、Scenario、UTF 和无模型报告不加载该文件；项目截图权限仍由各 Unity 工程管理。
 
