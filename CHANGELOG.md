@@ -4,7 +4,14 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本号遵循 [SemVer](https://semver.org/)。
 
-## [0.4.0]（候选，未发布）
+## [0.4.1]（候选，未发布）
+
+### 修复
+
+- 修复同秒同名会话撞目录；Scenario 在 Play Mode 切换时允许状态查询短暂断开，结束会话失败仍保留本地报告和终态，且不会重复执行点击或播放命令。
+- 补充 Game View 渲染尺寸超出 Unity 输入边界时的排查和分辨率调整方法，不绕过遮挡与射线检查。
+
+## [0.4.0]（未单独发布）
 
 ### 编辑器 Bridge
 
@@ -17,7 +24,6 @@
 - 新增本地中文 `watch` 和 `agent-run`：在 Unity Game View 的步骤截图上显示实际命令、操作理由、点击落点和结构化断言。使用当前 Agent 操作，无需为 Midscene 配置模型。
 - `unityctl test run/status` 支持独立 Unity 进程执行 UTF EditMode / PlayMode，归档 JSON、NUnit XML 和 Unity 日志。
 - `unityctl runs list/show` 统一查询 Agent、Scenario、UTF 和可选 Midscene 的运行证据。
-- 修复同秒同名会话撞目录；Scenario 在 Play Mode 切换时允许状态查询短暂断开，结束会话失败仍保留本地报告和终态，且不会重复执行点击或播放命令。
 - 扩展离线资源健康检查和构建体积分析；补充性能、弹窗 UI 回归示例和内置 Skill 触发评测。
 - 验收范围保持 Unity 2022.3；远端日常 CI 只做不启动 Unity 的检查。Unity 全量矩阵、Game View 和监看在本机验证。
 
