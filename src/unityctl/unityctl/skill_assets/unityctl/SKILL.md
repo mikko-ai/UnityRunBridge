@@ -1,6 +1,6 @@
 ---
 name: unityctl
-description: 用 unityctl CLI 验证 Unity 项目。适用于旧工程 Bridge 版本与能力诊断、启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
+description: 用 unityctl CLI 验证 Unity 项目。适用于旧工程 Bridge 版本与能力诊断、启动 Editor、重编译、Play Mode、Console 日志、Hierarchy/截图、UI Scenario、实时监看、运行记录查询、通过测试逐步积累玩法经验、记录卡点、询问待确认问题与吸收用户纠正、性能回归、离线 .meta/GUID 健康检查与构建体积预算。只写 Unity 代码、不执行验证，或只编写项目专属 Skill 时不使用。
 x-unityctl-version: __UNITYCTL_VERSION__
 ---
 
@@ -81,6 +81,10 @@ unityctl doctor --require-capability interaction --require-route POST interactio
 | 性能采样 / Player 构建 / 构建大小 / 健康检查 | `profile` / `build` / `build-size` / `health` | `references/profiling-build-health.md` |
 
 项目专属知识（界面约定等）不在本 skill 中：查看项目 `.agents/skills/` 下的其他 skill；如何编写见仓库 README「为你的项目编写自定义 skill」一节。
+
+## 玩法学习与用户纠正
+
+用户要求探索玩法、复玩、沉淀经验、查询测试中待确认的问题或纠正流程时，先读 [玩法经验工作流](references/gameplay-learning.md)。同一游戏工程内先复用已验证的路线，再补本次新发现；没把握就留下可回答的问题。用户答复先记为待复验，测试证据确认后才升级为可复用路线。玩法内容保存在各自工程，不写进通用 Skill；只问问题或解释知识时不需要启动 Unity。
 
 ## 高频错误码
 

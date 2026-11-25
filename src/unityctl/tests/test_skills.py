@@ -328,3 +328,32 @@ def test_bundled_observation_reference_is_installed(tmp_path, capsys):
     assert "references/observation.md" in index
     for command in ("unityctl watch", "scenario run PATH --observe", "unityctl runs show KEY"):
         assert command in reference
+
+
+def test_gameplay_learning_installs_and_skill_update_preserves_project_knowledge(tmp_path, capsys):
+    game = make_unity_project(tmp_path / "Game")
+    output = run_skills(game, "init", capsys)
+    root = Path(next(s["skillPath"] for s in output["skills"] if s["name"] == "unityctl"))
+    reference = root / "references" / "gameplay-learning.md"
+    assert "[玩法经验工作流](references/gameplay-learning.md)" in (root / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    bundled_workflow = reference.read_bytes()
+
+    knowledge = game / ".unity-agent" / "gameplay-knowledge"
+    (knowledge / "flows").mkdir(parents=True)
+    notes = {
+        knowledge / "index.md": b"schema: 1\nF-001\n",
+        knowledge / "questions.md": b"Q-001\n",
+        knowledge / "flows" / "sample.md": b"F-001\n",
+    }
+    for path, text in notes.items():
+        path.write_bytes(text)
+
+    reference.write_text("stale workflow", encoding="utf-8")
+    output = run_skills(game, "update", capsys)
+
+    assert output["code"] == "updated"
+    assert reference.read_bytes() == bundled_workflow
+    assert {path: path.read_bytes() for path in notes} == notes
+    assert not (root / "gameplay-knowledge").exists()

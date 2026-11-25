@@ -443,9 +443,19 @@ skill 的 frontmatter 中带有 `x-unityctl-version` 字段，记录生成它的
 
 内置 Skill 的触发范围可用[中英双语触发评测](evals/README.md)检查。离线自检随 Python 测试运行；盲评可独立导出与评分。
 
+## 让 Agent 逐步学会玩法
+
+运行、截图与 Watch 回答「这次发生了什么」，玩法知识回答「下次该怎么做」。可以对 Agent 说：
+
+- 「继续测试这个玩法，先查上次验证过的路线，把新卡点记下来。」
+- 「上次还有哪些问题需要我回答？只查记录，不开 Unity。」
+- 「Q-… 的正确流程是……先记为待复验。」
+
+内置 Skill 优先使用工程已有知识库；无约定时，在允许写入的工程中使用 `.unity-agent/gameplay-knowledge/`。用户说明不等于实测，复验后才标为已验证。知识与内置 Skill 分开存放，不随 Skill 更新覆盖；不会自动上传、提交或修改游戏代码。详见[玩法经验工作流](src/unityctl/unityctl/skill_assets/unityctl/references/gameplay-learning.md)。
+
 ## 为你的项目编写自定义 skill
 
-官方 `unityctl` skill 是通用参考手册，由 `unityctl skills update` 整目录覆盖刷新，**不要直接修改它**。项目专属的知识与流程放在你自己的 skill 里：
+官方 `unityctl` skill 是通用参考手册，由 `unityctl skills update` 整目录覆盖刷新，**不要直接修改它**。可复用的玩法经验按上节保存在工程内；如果需要为团队约定专属操作流程，再编写自己的 Skill：
 
 1. 在 `.agents/skills/<名字>/SKILL.md` 新建自己的 skill（`skills update` 永不触碰官方分发清单之外的目录）。
 2. 自定义 skill 里写项目知识（界面约定、专属验证流程），组合调用 unityctl 命令即可；不要复述命令用法，用法以官方 skill 为准，避免两处过时。

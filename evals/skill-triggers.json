@@ -208,5 +208,43 @@
     "explicitSkills": [],
     "expected": [],
     "prompt": "Document our UI convention in a new project skill; do not run the editor."
+  },
+  {
+    "id": "zh11",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "接着测试这个 Unity 游戏。先复用上次确认的玩法路线，把卡住的地方记下来，下次我可以帮你纠正。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "zh12",
+    "locale": "zh",
+    "kind": "should",
+    "prompt": "上次玩这个 Unity 游戏，你有哪些待我确认的问题？只查看已有记录，不开编辑器。",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "en11",
+    "locale": "en",
+    "kind": "should",
+    "prompt": "For the Unity gameplay test, update your existing project notes with my answer to the open question. Don't replay it yet.",
+    "explicitSkills": [],
+    "expected": [
+      "unityctl"
+    ]
+  },
+  {
+    "id": "zh13",
+    "locale": "zh",
+    "kind": "none",
+    "prompt": "我只是想聊这个游戏可能有哪些玩法创意，不运行 Unity，也不读取或保存测试经验。",
+    "explicitSkills": [],
+    "expected": []
   }
 ]
