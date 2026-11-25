@@ -254,7 +254,9 @@ unityctl doctor
 
 ### 旧工程升级诊断
 
-升级全局 CLI 后，先在旧工程运行 `unityctl doctor`。报告的 `versions` 包含 CLI 版本、`Packages/manifest.json` 中的 Bridge 引用和可识别的声明版本，以及 Editor 实际加载的 Bridge 版本。分支、提交和本地路径只报告引用，不猜测版本。版本不同写入 `warnings`，本身不会导致检查失败。
+首次接手、切换工程或更新工具后，先运行 `unityctl doctor`。报告的 `versions` 包含 CLI 版本、已安装 Skill 的版本标记、工程配置格式与 CLI 预期格式、`Packages/manifest.json` 中的 Bridge 引用和可识别的声明版本，以及 Editor 实际加载的 Bridge 版本。配置的 `version: 1` 是格式版本，不是 CLI 或 UPM 版本。缺失的版本显示为 `null`；分支、提交和本地路径不猜版本。版本不同写入 `warnings`，本身不会导致检查失败。
+
+默认检查工程内的 `.agents/skills/unityctl/SKILL.md`；如果 Skill 安装到了别处，用 `unityctl doctor --skills-target <Skill 根目录>`。报告的 `skillPath` 是此次检查的文件，不代表自动识别了 Agent 加载的 Skill。
 
 如果任务依赖特定能力，可重复指定 `--require-capability NAME` 和 `--require-route METHOD PATH`，例如：
 

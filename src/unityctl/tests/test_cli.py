@@ -1365,7 +1365,14 @@ def test_doctor_checks_versions_and_required_route_without_writing(
     unity = tmp_path / "Unity"
     unity.touch()
     cli.init_project_config(project_path=project, unity_path=unity)
-    paths = [manifest, project / ".unity-agent/config.json", project / ".unity-agent/config.local.json"]
+    skill = project / ".agents/skills/unityctl/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: unityctl\nx-unityctl-version: 0.3.2\n---\n")
+    config = project / ".unity-agent/config.json"
+    payload = json.loads(config.read_text())
+    payload["version"] = 2
+    config.write_text(json.dumps(payload))
+    paths = [manifest, config, project / ".unity-agent/config.local.json", skill]
     before = [path.read_bytes() for path in paths]
     monkeypatch.setattr(cli, "read_bridge_info", lambda path: make_bridge_info())
     monkeypatch.setattr(cli, "is_pid_alive", lambda pid: True)
@@ -1385,9 +1392,14 @@ def test_doctor_checks_versions_and_required_route_without_writing(
         "declaredUpmReference": reference,
         "declaredUpmVersion": "0.3.2",
         "loadedBridgeVersion": "0.4.1",
+        "skillPath": str(skill),
+        "skillVersion": "0.3.2",
+        "configSchemaVersion": 2,
+        "expectedConfigSchemaVersion": 1,
     }
     assert {warning["code"] for warning in report["warnings"]} == {
         "cli_bridge_version_mismatch", "declared_loaded_version_mismatch",
+        "skill_version_mismatch", "config_schema_version_mismatch",
     }
     assert [requirement["state"] for requirement in report["requirements"]] == states
     guidance = report["repairGuidance"]
@@ -1413,7 +1425,47 @@ def test_doctor_keeps_local_reference_without_guessing_declared_version(tmp_path
         "declaredUpmReference": reference,
         "declaredUpmVersion": None,
         "loadedBridgeVersion": None,
+        "skillPath": str(project / ".agents/skills/unityctl/SKILL.md"),
+        "skillVersion": None,
+        "configSchemaVersion": None,
+        "expectedConfigSchemaVersion": 1,
     }
+    assert {warning["code"] for warning in data["warnings"]} == {
+        "skill_version_unknown", "config_schema_version_unknown",
+    }
+    assert not (project / ".agents").exists() and not (project / ".unity-agent").exists()
+
+
+@pytest.mark.parametrize("target_kind", ["absolute", "relative"])
+def test_doctor_checks_selected_skill_target(tmp_path, capsys, target_kind):
+    project = make_unity_project(tmp_path / "Game")
+    cli.init_project_config(project_path=project)
+    skill = project / "custom-skills/unityctl/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(f"---\nname: unityctl\nx-unityctl-version: {__version__}\n---\n")
+    target = skill.parent.parent
+    if target_kind == "relative":
+        target = target.relative_to(project)
+
+    assert cli.main(["doctor", "--project", str(project), "--skills-target", str(target)]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["versions"]["skillPath"] == str(skill)
+    assert data["versions"]["skillVersion"] == __version__
+    assert data["versions"]["configSchemaVersion"] == data["versions"]["expectedConfigSchemaVersion"] == 1
+    assert data["warnings"] == []
+
+
+@pytest.mark.parametrize("content", ['{"version": true}', '{"version": "1"}', "[]", "{}"])
+def test_doctor_does_not_guess_config_version_or_rewrite(tmp_path, capsys, content):
+    project = make_unity_project(tmp_path / "Game")
+    cli.init_project_config(project_path=project)
+    config = project / ".unity-agent/config.json"
+    config.write_text(content)
+    assert cli.main(["doctor", "--project", str(project)]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["versions"]["configSchemaVersion"] is None
+    assert any(issue["code"] == "config_schema_version_unknown" for issue in data["warnings"])
+    assert config.read_text() == content
 
 
 def _make_build_result(**overrides) -> BuildResult:

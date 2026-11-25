@@ -9,6 +9,7 @@
 - 内置 Agent Skill 可跨会话复用工程内的玩法路线，记录待答问题、吸收用户纠正，并在复验后提升为已验证经验；无需新增 Bridge 能力。
 - Watch 显示实时总耗时、步骤相对时间与单步耗时，并区分执行中和等待 Agent 下一步；旧记录无需迁移。
 - `unityctl doctor` 对照 CLI、工程声明的 UPM 依赖和实际加载的 Bridge 版本；支持只读核验所需能力/路由，输出 Agent 可执行的升级指引和人工审批边界。
+- `unityctl doctor` 同时报告 Skill 版本与工程配置格式版本；Agent Skill 增加操作前检查与修复前确认规则。
 - 可选 Midscene 插件支持 `~/.unity-agent-bridge/plugins/midscene.jsonc` 用户级共享配置，同时兼容已有的 `midscene.json`；两者同时存在时明确报错，可在不启动 Unity 或调用模型的情况下检查。
 - 新增 `unityctl plugins init midscene`：从任意目录创建带字段注释的 JSONC 模板，不覆盖或迁移已有配置、不读取模型密钥。
 - Midscene 共享配置新增可选 `protocol`，支持选择 Chat Completions 或 Responses；初始化模板和配置检查提示合法值及兼容限制。

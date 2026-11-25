@@ -3,10 +3,59 @@ from pathlib import Path
 from typing import Any
 
 from unityctl import __version__
-from unityctl.config import UNITY_AGENT_BRIDGE_PACKAGE_ID, UNITY_AGENT_BRIDGE_GIT_URL, read_json
+from unityctl.config import (
+    CONFIG_SCHEMA_VERSION,
+    PROJECT_CONFIG_FILENAME,
+    UNITY_AGENT_BRIDGE_GIT_URL,
+    UNITY_AGENT_BRIDGE_PACKAGE_ID,
+    read_json,
+)
+from unityctl.skills import SKILL_FILENAME, read_skill_version, resolve_skills_dir
 
 _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?")
 _UGUI_CAPABILITIES = {"interaction", "recording"}
+
+
+def project_version_report(project: Path | None, skills_target: str | None) -> tuple[dict, list[dict]]:
+    versions: dict[str, Any] = {
+        "skillPath": None,
+        "skillVersion": None,
+        "configSchemaVersion": None,
+        "expectedConfigSchemaVersion": CONFIG_SCHEMA_VERSION,
+    }
+    warnings = []
+    if project is None:
+        return versions, warnings
+
+    def warn(code: str, message: str) -> None:
+        warnings.append({"code": code, "message": message})
+
+    skill_dir = resolve_skills_dir(project, skills_target) / "unityctl"
+    versions["skillPath"] = str(skill_dir / SKILL_FILENAME)
+    try:
+        skill_version = read_skill_version(skill_dir)
+    except (OSError, UnicodeError):
+        warn("skill_version_unknown", "无法读取所选位置的 unityctl Skill 版本。")
+    else:
+        if not skill_version or not _VERSION.fullmatch(skill_version):
+            warn("skill_version_unknown", "所选位置没有可识别的 unityctl Skill 版本；请确认 Agent 加载的是哪份。")
+        else:
+            versions["skillVersion"] = skill_version
+            if skill_version != __version__:
+                warn("skill_version_mismatch", "Skill 与 CLI 版本不同；请先对照 CLI 帮助，确认后再更新 Skill。")
+
+    try:
+        config = read_json(project / ".unity-agent" / PROJECT_CONFIG_FILENAME)
+    except (OSError, ValueError):
+        config = None
+    schema_version = config.get("version") if isinstance(config, dict) else None
+    if type(schema_version) is not int or schema_version < 1:
+        warn("config_schema_version_unknown", "工程配置格式版本未知；不要猜测版本或直接补写字段。")
+    else:
+        versions["configSchemaVersion"] = schema_version
+        if schema_version != CONFIG_SCHEMA_VERSION:
+            warn("config_schema_version_mismatch", "工程配置格式与当前 CLI 预期不同；请先核对兼容性或迁移说明。")
+    return versions, warnings
 
 
 def read_bridge_reference(project: Path) -> str | None:

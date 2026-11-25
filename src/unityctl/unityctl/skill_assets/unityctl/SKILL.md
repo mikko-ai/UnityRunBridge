@@ -8,6 +8,14 @@ x-unityctl-version: __UNITYCTL_VERSION__
 
 `unityctl` 是控制本地 Unity Editor 的 CLI。所有命令在 Unity 项目根目录或其子目录中执行（也可用 `--project <path>` 指定项目），输出统一为 JSON：成功时 stdout 输出 `{"ok": true, ...}`，失败时 stderr 输出 `{"ok": false, "code": "...", "message": "..."}` 且退出码为 1。
 
+## 操作前检查
+
+首次接手工程、切换工程，或 CLI、Skill、Bridge 更新后，先运行一次 `unityctl doctor`。如果 Agent 加载的不是工程默认 Skill，使用 `--skills-target <Skill 根目录>` 检查实际加载的那份；传入安装 Skill 时指定的根目录，而不是 Skill 文件路径。只查历史记录、版本或诊断信息时，不要求 Editor 已启动；即使 Editor 离线，仍可从 stdout 读取 `doctor` 报告。
+
+- 看 `versions` 和 `warnings`：对照 Skill 与 CLI、Bridge 声明与实际加载版本，以及 `configSchemaVersion` 和 `expectedConfigSchemaVersion`。配置格式版本不是产品版本。版本不同只提示，不因版本号不同就禁止使用；缺版本不等于兼容，不猜测或补写。
+- 执行点击、输入等有副作用的操作前，用 `doctor --require-capability` / `--require-route` 核验任务所需能力。例如坐标点击需 `unityctl doctor --require-capability interaction --require-route POST interaction/click-at`。所需项 `missing` 就停止相关操作；`unverified` 时先排查，不能当作已核验。同一工程、工具和 Editor 环境未变时，可复用本次任务已通过的检查，不必每步重复查询。
+- 默认只诊断。涉及更新 Skill、迁改配置或切换 UPM 依赖时，先说明原因、拟改动和复验方法，取得用户明确确认再修复。修复后重跑诊断与任务所需能力检查。
+
 ## 核心工作流：改完代码后验证
 
 改完 Unity 项目代码后，按以下顺序验证：
@@ -54,7 +62,7 @@ unityctl config validate    # 确认配置无误后再 start
 
 ### 旧工程接入与能力修复
 
-首次接手旧工程、CLI 升级后或命令返回 `bridge_capability_missing` 时，先运行 `unityctl doctor`。再按任务核验需要的能力或路由，例如验证坐标点击：
+命令返回 `bridge_capability_missing` 时，不要盲目重试。按任务核验需要的能力或路由，例如验证坐标点击：
 
 ```bash
 unityctl doctor --require-capability interaction --require-route POST interaction/click-at

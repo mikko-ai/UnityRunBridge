@@ -42,7 +42,13 @@ from unityctl.discovery import (
     is_unity_project_locked,
     read_bridge_info,
 )
-from unityctl.doctor import check_requirements, read_bridge_reference, repair_guidance, version_report
+from unityctl.doctor import (
+    check_requirements,
+    project_version_report,
+    read_bridge_reference,
+    repair_guidance,
+    version_report,
+)
 from unityctl.editor import start_editor
 from unityctl.health import HealthError, run_health
 from unityctl.jobs import JobEditorExited, JobFailed, JobTimeout, wait_for_job
@@ -489,10 +495,12 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser(
         "doctor",
         help="诊断项目配置、Bridge 版本和连通性",
-        description="只读检查 Unity 工程、CLI/UPM/Bridge 版本和任务所需能力；不会修改项目。",
+        description="只读检查 CLI、Skill、配置格式、UPM/Bridge 版本和任务所需能力；不会修改项目。",
         formatter_class=_HelpFormatter,
     )
     _add_project_option(doctor)
+    doctor.add_argument("--skills-target", metavar="PATH",
+                        help="要检查的 Skill 根目录（同 skills --target；默认工程的 .agents/skills）")
     doctor.add_argument("--require-capability", action="append", default=[], metavar="NAME",
                         help="核验任务必需的 Bridge 能力，可重复指定")
     doctor.add_argument("--require-route", action="append", nargs=2, default=[], metavar=("METHOD", "PATH"),
@@ -2205,7 +2213,7 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
         try:
             effective = resolve_effective_config(project_path=project_path)
             add("config_json", True, str(effective.project_config_path))
-        except (json.JSONDecodeError, ValueError) as exc:
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
             add("config_json", False, str(exc))
 
     if effective is not None:
@@ -2275,10 +2283,15 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, Any]:
             add("project_lock", True, "项目未被占用，可以运行 unityctl start")
 
     versions, warnings = version_report(reference, loaded_version)
+    project_versions, project_warnings = project_version_report(project_path, args.skills_target)
+    versions.update(project_versions)
+    warnings.extend(project_warnings)
     requirements = check_requirements(capability_response, args.require_capability, args.require_route)
     recheck = ["unityctl", "doctor"]
     if project_path is not None:
         recheck.extend(["--project", str(project_path)])
+    if args.skills_target:
+        recheck.extend(["--skills-target", args.skills_target])
     for capability in args.require_capability:
         recheck.extend(["--require-capability", capability])
     for method, path in args.require_route:
