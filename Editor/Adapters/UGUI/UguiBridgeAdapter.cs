@@ -21,6 +21,7 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
             UguiHitTestBackend hitTest = new UguiHitTestBackend();
             UguiInteractionGestureBackend gesture = new UguiInteractionGestureBackend();
 
+            services.Add<IUiPrefabIndexer>(new UguiPrefabIndexer(), 100);
             services.Add<INodeEnricher>(enricher, enricher.Priority);
             services.Add<ITextControlAdapter>(text, text.Priority);
             // The registry resolves implemented contracts from this single instance.
