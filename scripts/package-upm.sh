@@ -28,13 +28,15 @@ mkdir -p "$DIST_DIR"
 # Unity 要求本地 tarball 内部的顶层目录必须严格命名为 "package"
 # （而不是包名本身），否则 Unity 解压后会在临时目录下找不到
 # package.json，报错 "The file [.../package.json] cannot be found"。
-STAGE_DIR="$(mktemp -d)"
+STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/unity-upm.XXXXXX")"
 trap 'rm -rf "$STAGE_DIR"' EXIT
+# macOS tar otherwise exports extended attributes as ._* AppleDouble entries.
+export COPYFILE_DISABLE=1
 cp -R "$PACKAGE_DIR" "$STAGE_DIR/package"
 
 echo "打包 Unity UPM package：$ARCHIVE_NAME"
 tar \
-  --exclude=".DS_Store" \
+  --exclude=".DS_Store" --exclude="._*" \
   -czf "$DIST_DIR/$ARCHIVE_NAME" \
   -C "$STAGE_DIR" \
   "package"
