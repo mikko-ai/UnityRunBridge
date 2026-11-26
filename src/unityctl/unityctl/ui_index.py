@@ -67,7 +67,10 @@ def add_parser(subparsers, add_project_option):
                             ("click", "同一请求内核验并非强制点击")):
         runtime = actions.add_parser(verb, help=help_text)
         runtime.add_argument("control_id", **({} if verb == "bind" else {"nargs": "?"}))
-        runtime.add_argument("--scene", required=True, help="当前加载的完整 .unity 资源路径")
+        scene_help = "当前加载的完整 .unity 资源路径"
+        if verb != "bind":
+            scene_help += "；动态绑定亦可指定 DontDestroyOnLoad"
+        runtime.add_argument("--scene", required=True, help=scene_help)
         runtime.add_argument("--root", default="Assets", help="Prefab 缓存范围")
         runtime.add_argument("--instance-root", help="唯一的运行态 Prefab 根层级路径")
         if verb == "resolve":
@@ -78,8 +81,10 @@ def add_parser(subparsers, add_project_option):
 
 
 def runtime_binding(project, root, args):
-    if not args.scene.endswith(".unity") or not 0 < len(args.scene) <= 1024:
-        raise UiIndexError("invalid_argument", "需要完整场景资源路径，例如 Assets/Scenes/Demo.unity")
+    persistent = (args.scene == "DontDestroyOnLoad" and args.control_id is None
+                  and args.ui_index_action in {"resolve", "click"})
+    if not persistent and (not args.scene.endswith(".unity") or not 0 < len(args.scene) <= 1024):
+        raise UiIndexError("invalid_argument", "需提供已保存场景路径；仅动态绑定可使用 DontDestroyOnLoad")
     request = {"scene": args.scene}
     runtime_path = getattr(args, "runtime_path", None)
     instance_id = getattr(args, "instance_id", None)

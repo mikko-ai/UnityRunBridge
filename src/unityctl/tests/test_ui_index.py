@@ -1,11 +1,14 @@
 import json
 import sqlite3
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import pytest
 
 from unityctl import cli, ui_index
+from unityctl import client as bridge_client
 
 ROOT = "Assets/Menu"
 A, B = "a" * 32, "b" * 32
@@ -258,7 +261,8 @@ def test_runtime_old_bridge_or_missing_specific_route_does_not_post(project, mon
     assert json.loads(capsys.readouterr().err)["code"] == "bridge_capability_missing"
 
 
-def test_runtime_dynamic_resolve_uses_fresh_hierarchy_evidence_without_cache(project, monkeypatch, capsys):
+@pytest.mark.parametrize("scene", ["Assets/Lab.unity", "DontDestroyOnLoad"])
+def test_runtime_dynamic_resolve_uses_fresh_hierarchy_evidence_without_cache(project, monkeypatch, capsys, scene):
     requests = []
 
     class Bridge:
@@ -272,10 +276,37 @@ def test_runtime_dynamic_resolve_uses_fresh_hierarchy_evidence_without_cache(pro
 
     monkeypatch.setattr(cli, "discover", lambda _: SimpleNamespace(base_url="unused", token="unused"))
     monkeypatch.setattr(cli, "BridgeClient", lambda *_: Bridge())
-    argv = ["--project", str(project), "ui-index", "resolve", "--scene", "Assets/Lab.unity",
+    argv = ["--project", str(project), "ui-index", "resolve", "--scene", scene,
             "--runtime-path", "Canvas/B", "--instance-id=-234"]
     assert cli.main(argv) == 0
     assert json.loads(capsys.readouterr().out)["runtimeToken"] == "e" * 32
-    assert requests == [("ui-index/resolve", {"binding": "runtime", "scene": "Assets/Lab.unity",
+    assert requests == [("ui-index/resolve", {"binding": "runtime", "scene": scene,
                                               "runtimePath": "Canvas/B", "instanceId": -234})]
     assert not ui_index.cache_path(project).exists()
+
+
+@pytest.mark.parametrize("action", ["bind", "resolve", "click"])
+def test_persistent_scope_does_not_accept_static_prefab_ids(project, action):
+    args = SimpleNamespace(scene="DontDestroyOnLoad", control_id="a" * 64, ui_index_action=action)
+    with pytest.raises(ui_index.UiIndexError, match="仅动态绑定"):
+        ui_index.runtime_binding(project, ROOT, args)
+
+
+def test_runtime_click_preserves_dispatched_events_on_http_conflict(project, monkeypatch, capsys):
+    events = ["pointerEnter", "pointerDown", "pointerUp", "pointerExit"]
+    body = {"ok": False, "code": "click_not_dispatched", "message": "changed",
+            "events": events, "runtimeToken": "do-not-copy"}
+
+    def conflict(request, timeout):
+        assert request.full_url.endswith("/ui-index/click")
+        raise HTTPError(request.full_url, 409, "Conflict", {}, BytesIO(json.dumps(body).encode()))
+
+    monkeypatch.setattr(cli, "discover", lambda _: SimpleNamespace(base_url="http://127.0.0.1:1", token="unused"))
+    monkeypatch.setattr(cli, "require_bridge_route", lambda *_: None)
+    monkeypatch.setattr(bridge_client, "urlopen", conflict)
+    code = cli.main(["--project", str(project), "ui-index", "click", "--scene", "DontDestroyOnLoad",
+                     "--runtime-token", "a" * 32])
+    assert code == 1
+    assert json.loads(capsys.readouterr().err) == {
+        "ok": False, "code": "click_not_dispatched", "message": "changed", "events": events,
+    }

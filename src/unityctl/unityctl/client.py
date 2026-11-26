@@ -7,9 +7,10 @@ from urllib.request import Request, urlopen
 
 
 class BridgeClientError(RuntimeError):
-    def __init__(self, message: str, code: str = "internal_error"):
+    def __init__(self, message: str, code: str = "internal_error", body: dict[str, Any] | None = None):
         super().__init__(message)
         self.code = code
+        self.body = body or {}
 
 
 class BridgeUnreachableError(BridgeClientError):
@@ -309,7 +310,7 @@ class BridgeClient:
             code = body.get("code", "internal_error") if body else "internal_error"
             message = body.get("message") if body else None
             raise BridgeClientError(
-                message or f"HTTP {exc.code}: {exc.reason}", code=code
+                message or f"HTTP {exc.code}: {exc.reason}", code=code, body=body
             ) from exc
         except URLError as exc:
             raise BridgeUnreachableError(f"无法连接 Unity Bridge：{exc.reason}") from exc

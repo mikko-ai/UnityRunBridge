@@ -1798,11 +1798,16 @@ def cmd_ui_index(args: argparse.Namespace) -> dict[str, Any]:
             client = BridgeClient(info.base_url, info.token)
             require_bridge_route(client, "ui-index", "POST", route)
             request = ui_index.runtime_binding(project, root, args)
-            reply = client.post(route, request)
+            try:
+                reply = client.post(route, request)
+            except BridgeClientError as exc:
+                if not exc.body:
+                    raise
+                raise CliError(exc.code, str(exc), _ui_index_failure_details(exc.body)) from exc
             if not reply.get("ok"):
                 raise CliError(reply.get("code", "ui_index_runtime_failed"),
                                reply.get("message", "运行态 UI 定位失败"),
-                               {key: reply[key] for key in ("blockedBy",) if key in reply})
+                               _ui_index_failure_details(reply))
             return reply
         if not math.isfinite(args.timeout) or not 0 < args.timeout <= 900:
             raise CliError("invalid_argument", "UI 同步超时必须大于 0 且不超过 900 秒")
@@ -1833,6 +1838,17 @@ def cmd_ui_index(args: argparse.Namespace) -> dict[str, Any]:
         raise CliError("editor_exited", str(exc)) from exc
     except OSError as exc:
         raise CliError("ui_index_io_error", str(exc)) from exc
+
+
+def _ui_index_failure_details(reply: dict[str, Any]) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    if isinstance(reply.get("blockedBy"), str):
+        details["blockedBy"] = reply["blockedBy"]
+    names = ("pointerEnter", "pointerDown", "pointerUp", "pointerClick", "pointerExit")
+    events = reply.get("events")
+    if isinstance(events, list) and len(events) <= len(names) and all(event in names for event in events):
+        details["events"] = events
+    return details
 
 
 def cmd_snapshot(args: argparse.Namespace) -> dict[str, Any]:

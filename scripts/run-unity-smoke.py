@@ -489,10 +489,14 @@ def run_indexed_click(base, unity, upm=None, *, layout=(640, 360), benchmark=Fal
             probe("remove-clone")
             attempt((*target_args, "--instance-root", "UiCanvas/Panel", "--scene", "Assets/Scenes/Other.unity"),
                     "ui_index_scene_missing")
+            probe("multiple-prefab-handlers")
+            multi = attempt((*target_args, *scope))
+            assert multi["clickHandlerTypes"] == ["UnityEngine.UI.Button", "UnityEngine.EventSystems.EventTrigger"], multi
+            assert probe("counts") == "2:0" and probe("extra-count") == "1"
             with sqlite3.connect(project / "Library/UnityRunBridge/ui-index.sqlite3") as conn:
                 conn.execute("UPDATE prefabs SET fingerprint=?", ("0" * 32,))
             attempt((*target_args, *scope), "ui_index_stale")
-            assert probe("counts") == "1:0"
+            assert probe("counts") == "2:0"
 
             found = cli(project, "hierarchy", "find", "--name", "Dynamic", "--active-only")
             dynamic, = found["nodes"]
@@ -501,12 +505,54 @@ def run_indexed_click(base, unity, upm=None, *, layout=(640, 360), benchmark=Fal
             dynamic_args = ("--scene", scene, "--runtime-token", witness["runtimeToken"])
             assert attempt(dynamic_args)["clicked"] == "UiCanvas/Dynamic"
             attempt(dynamic_args, "ui_index_witness_expired")
-            assert probe("counts") == "2:0"
+            assert probe("counts") == "3:0"
+            persistent = "DontDestroyOnLoad"
+            runtime_args = ("--runtime-path", dynamic["path"], f"--instance-id={dynamic['instanceId']}")
+            probe("persist-canvas")
+            cli(project, "ui-index", "resolve", "--scene", scene, *runtime_args, expected="ui_index_stale")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            assert proof["scene"] == persistent and proof["instanceId"] == dynamic["instanceId"], proof
+            attempt(("--scene", scene, "--runtime-token", proof["runtimeToken"]), "ui_index_stale")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            proof_args = ("--scene", persistent, "--runtime-token", proof["runtimeToken"])
+            assert attempt(proof_args)["clicked"] == dynamic["path"]
+            attempt(proof_args, "ui_index_witness_expired")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            probe("multiple-handlers")
+            attempt(("--scene", persistent, "--runtime-token", proof["runtimeToken"]), "ui_index_stale")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            multi = attempt(("--scene", persistent, "--runtime-token", proof["runtimeToken"]))
+            assert multi["clickHandlerTypes"] == proof["clickHandlerTypes"] == [
+                "UnityEngine.UI.Button", "UnityEngine.EventSystems.EventTrigger"]
+            assert probe("counts") == "5:0" and probe("extra-count") == "2"
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            probe("replace-extra-handler")
+            refreshed = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            assert refreshed["clickHandlerTypes"] == proof["clickHandlerTypes"]
+            attempt(("--scene", persistent, "--runtime-token", proof["runtimeToken"]), "ui_index_stale")
+            assert probe("counts") == "5:0" and probe("extra-count") == "2"
+            probe("mutate-on-enter")
+            interrupted = attempt(("--scene", persistent, "--runtime-token", refreshed["runtimeToken"]), "click_not_dispatched")
+            assert "pointerEnter" in interrupted["events"] and "pointerDown" not in interrupted["events"], interrupted
+            assert "pointerClick" not in interrupted["events"], interrupted
+            assert probe("counts") == "5:0" and probe("extra-count") == "2"
+            probe("cover-on-down")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            covered = attempt(("--scene", persistent, "--runtime-token", proof["runtimeToken"]), "click_not_dispatched")
+            assert "pointerDown" in covered["events"] and "pointerClick" not in covered["events"], covered
+            assert "clicked" not in covered, covered
+            assert probe("counts") == "5:0" and probe("extra-count") == "2"
+            probe("clear-down-cover")
+            proof = cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args)
+            probe("restore-canvas")
+            attempt(("--scene", persistent, "--runtime-token", proof["runtimeToken"]), "ui_index_stale")
+            cli(project, "ui-index", "resolve", "--scene", persistent, *runtime_args, expected="ui_index_stale")
+            assert probe("counts") == "5:0"
             witness = cli(project, "ui-index", "resolve", "--scene", scene, "--runtime-path", dynamic["path"],
                           f"--instance-id={dynamic['instanceId']}")
             probe("rename-dynamic")
             attempt(("--scene", scene, "--runtime-token", witness["runtimeToken"]), "ui_index_stale")
-            assert probe("counts") == "2:0"
+            assert probe("counts") == "5:0"
             refound = cli(project, "hierarchy", "find", "--name", "DynamicChanged", "--active-only")
             new_node, = refound["nodes"]
             witness = cli(project, "ui-index", "resolve", "--scene", scene, "--runtime-path", new_node["path"],
@@ -520,10 +566,13 @@ def run_indexed_click(base, unity, upm=None, *, layout=(640, 360), benchmark=Fal
         audits = [entry for entry in audits if entry.get("action") == "ui-index-click"]
         assert [entry["code"] for entry in audits] == expected, audits
         assert all("runtimeToken" not in entry["request"] for entry in audits), audits
-        assert sum(entry["ok"] for entry in audits) == 2
+        for audit, response in zip(audits, responses):
+            if response.get("code") == "click_not_dispatched":
+                assert audit["events"] == response["events"] and "clicked" not in audit, (audit, response)
+        assert sum(entry["ok"] for entry in audits) == 5
         write_json(project / "indexed-click-result.json", {"methods": expected, "responses": responses, "audits": audits,
-                                                          "expectedCallbacks": 2, "unexpectedCallbacks": 0})
-        print(f"Indexed click: {len(expected)} attempts; 2 intended callbacks, 0 unexpected ({project})", flush=True)
+                                                          "expectedCallbacks": 7, "unexpectedCallbacks": 0})
+        print(f"Indexed click: {len(expected)} attempts; 7 intended callbacks, 0 unexpected ({project})", flush=True)
     finally:
         terminate(editor)
 

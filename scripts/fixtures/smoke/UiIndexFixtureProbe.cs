@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public sealed class UiIndexFixtureProbe : MonoBehaviour
@@ -12,6 +13,9 @@ public sealed class UiIndexFixtureProbe : MonoBehaviour
     private GameObject clone;
     private int clicks;
     private int wrongClicks;
+    private int extraClicks;
+    private bool mutateOnEnter;
+    private bool coverOnDown;
 
     private void Awake()
     {
@@ -43,6 +47,8 @@ public sealed class UiIndexFixtureProbe : MonoBehaviour
         {
             case "counts":
                 return fixture.clicks + ":" + fixture.wrongClicks;
+            case "extra-count":
+                return fixture.extraClicks.ToString();
             case "clone":
                 fixture.clone = Instantiate(fixture.prefabRoot.gameObject, fixture.prefabRoot.parent);
                 fixture.clone.name = fixture.prefabRoot.name;
@@ -102,8 +108,68 @@ public sealed class UiIndexFixtureProbe : MonoBehaviour
             case "rename-dynamic":
                 fixture.dynamic.name = "DynamicChanged";
                 break;
+            case "persist-canvas":
+                DontDestroyOnLoad(fixture.dynamic.transform.root.gameObject);
+                break;
+            case "restore-canvas":
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(
+                    fixture.dynamic.transform.root.gameObject, fixture.gameObject.scene);
+                break;
+            case "multiple-handlers":
+                fixture.AddExtraHandler(fixture.dynamic);
+                break;
+            case "multiple-prefab-handlers":
+                fixture.AddExtraHandler(fixture.expected);
+                break;
+            case "mutate-on-enter":
+                fixture.mutateOnEnter = true;
+                break;
+            case "replace-extra-handler":
+                DestroyImmediate(fixture.dynamic.GetComponent<EventTrigger>());
+                fixture.AddExtraHandler(fixture.dynamic);
+                break;
+            case "cover-on-down":
+                fixture.mutateOnEnter = false;
+                fixture.dynamic.GetComponent<EventTrigger>().enabled = true;
+                fixture.cover.GetComponent<RectTransform>().anchoredPosition =
+                    fixture.dynamic.GetComponent<RectTransform>().anchoredPosition;
+                var coverTrigger = fixture.cover.AddComponent<EventTrigger>();
+                var coverClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+                coverClick.callback.AddListener(_ => fixture.wrongClicks++);
+                coverTrigger.triggers.Add(coverClick);
+                fixture.coverOnDown = true;
+                break;
+            case "clear-down-cover":
+                fixture.coverOnDown = false;
+                fixture.cover.SetActive(false);
+                break;
             default: throw new System.ArgumentException("Unknown fixture action");
         }
         return "ok";
+    }
+
+    private void AddExtraHandler(Button button)
+    {
+        var trigger = button.gameObject.AddComponent<EventTrigger>();
+        var click = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
+        click.callback.AddListener(_ => extraClicks++);
+        trigger.triggers.Add(click);
+        var enter = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+        enter.callback.AddListener(_ =>
+        {
+            if (mutateOnEnter)
+                trigger.enabled = false;
+        });
+        trigger.triggers.Add(enter);
+        var down = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        down.callback.AddListener(_ =>
+        {
+            if (coverOnDown)
+            {
+                cover.SetActive(true);
+                Canvas.ForceUpdateCanvases();
+            }
+        });
+        trigger.triggers.Add(down);
     }
 }

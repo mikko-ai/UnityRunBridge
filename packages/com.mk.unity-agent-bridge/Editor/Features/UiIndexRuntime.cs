@@ -22,13 +22,15 @@ namespace Mk.UnityAgentBridge.Editor
         private static readonly Dictionary<string, Witness> Witnesses = new Dictionary<string, Witness>();
         private const int MaxWitnesses = 128;
         private const string ActionName = "ui-index-click";
+        private const string PersistentScene = NodePath.DontDestroyOnLoadSceneName;
         private const string EditBindings = "Mk.UnityAgentBridge.UiIndex.EditBindings";
         private const string PlayBindings = "Mk.UnityAgentBridge.UiIndex.PlayBindings";
         private static JsonValue playBindingCache;
 
         private sealed class Witness
         {
-            public Component Component;
+            public GameObject Target;
+            public Component[] Handlers;
             public string Path;
             public int SceneHandle;
             public double ExpiresAt;
@@ -179,16 +181,23 @@ namespace Mk.UnityAgentBridge.Editor
 
         private static object ExecuteCore(JsonValue body, string scenePath, IIndexedClickBackend backend, bool click)
         {
+            string binding = body?.GetString("binding");
+            bool persistent = scenePath == PersistentScene && binding == "runtime";
             if (body == null || !body.IsObject || !Bounded(scenePath)
-                || !scenePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
-                return Failure("invalid_argument", "需要完整且明确的已保存场景路径");
+                || (!persistent && !scenePath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)))
+                return Failure("invalid_argument", "需提供已保存场景路径；仅动态绑定可使用 DontDestroyOnLoad");
             if (!EditorApplication.isPlaying || !EditorApplication.isPlayingOrWillChangePlaymode)
                 return Failure("not_in_play_mode", "索引运行态定位与点击要求 Play Mode");
+            if (persistent)
+            {
+                if (!HierarchyScan.TryGetDontDestroyOnLoadScene(out Scene persistentScene))
+                    return Failure("ui_index_scene_missing", "无法确定 Unity 常驻场景");
+                return ExecuteRuntimeWitness(body, persistentScene, PersistentScene, backend, click);
+            }
             if (!FindScene(scenePath, out Scene scene, out bool ambiguous))
                 return Failure(ambiguous ? "ui_index_ambiguous" : "ui_index_scene_missing", "无法唯一匹配已加载场景");
 
             Component expected;
-            string binding = body.GetString("binding");
             switch (binding)
             {
                 case "prefab":
@@ -196,23 +205,25 @@ namespace Mk.UnityAgentBridge.Editor
                         return error;
                     break;
                 case "runtime":
-                    return ExecuteRuntimeWitness(body, scene, backend, click);
+                    return ExecuteRuntimeWitness(body, scene, scene.path, backend, click);
                 default:
                     return Failure("invalid_argument", "需要 prefab 或 runtime 绑定");
             }
 
-            if (backend.UniqueClickHandler(expected.gameObject) != expected)
-                return Failure("ui_index_handler_mismatch", "目标未激活、组件禁用或同节点点击处理器不唯一");
-            return Respond(expected, scenePath, binding, backend, click);
+            Component[] handlers = backend.GetActiveClickHandlers(expected.gameObject);
+            if (Array.IndexOf(handlers, expected) < 0)
+                return Failure("ui_index_handler_mismatch", "目标未激活或索引组件不是启用的点击处理器");
+            return Respond(expected.gameObject, expected, handlers, scenePath, binding, backend, click);
         }
 
-        private static object ExecuteRuntimeWitness(JsonValue body, Scene scene, IIndexedClickBackend backend, bool click)
+        private static object ExecuteRuntimeWitness(JsonValue body, Scene scene, string scope,
+            IIndexedClickBackend backend, bool click)
         {
             double now = EditorApplication.timeSinceStartup;
             var expired = new List<string>();
             foreach (var pair in Witnesses)
             {
-                if (pair.Value.ExpiresAt < now || pair.Value.Component == null)
+                if (pair.Value.ExpiresAt < now || pair.Value.Target == null)
                     expired.Add(pair.Key);
             }
             foreach (string key in expired)
@@ -224,11 +235,11 @@ namespace Mk.UnityAgentBridge.Editor
                 if (token == null || !Witnesses.TryGetValue(token, out Witness witness))
                     return Failure("ui_index_witness_expired", "当前 Play Mode 没有有效运行态凭证，请重新观察并 resolve");
                 Witnesses.Remove(token);
-                Component target = witness.Component;
-                if (target == null || witness.SceneHandle != scene.handle || target.gameObject.scene.handle != scene.handle
-                    || NodePath.BuildPath(target.transform) != witness.Path || backend.UniqueClickHandler(target.gameObject) != target)
-                    return Failure("ui_index_stale", "运行态目标或场景已发生变化");
-                return Respond(target, scene.path, "runtime", backend, true);
+                GameObject target = witness.Target;
+                if (target == null || witness.SceneHandle != scene.handle || target.scene.handle != scene.handle
+                    || NodePath.BuildPath(target.transform) != witness.Path || !backend.MatchesClickHandlers(target, witness.Handlers))
+                    return Failure("ui_index_stale", "运行态目标、场景或点击处理器已发生变化");
+                return Respond(target, witness.Handlers[0], witness.Handlers, scope, "runtime", backend, true);
             }
 
             string path = body.GetString("runtimePath");
@@ -237,31 +248,36 @@ namespace Mk.UnityAgentBridge.Editor
             GameObject node = EditorUtility.InstanceIDToObject((int)id) as GameObject;
             if (node == null || node.scene.handle != scene.handle || NodePath.BuildPath(node.transform) != path)
                 return Failure("ui_index_stale", "当前路径或场景与所观察实例不符");
-            Component expected = backend.UniqueClickHandler(node);
-            if (expected == null)
-                return Failure("ui_index_handler_mismatch", "动态节点没有唯一激活的点击处理器");
+            Component[] handlers = backend.GetActiveClickHandlers(node);
+            if (handlers.Length == 0)
+                return Failure("ui_index_handler_mismatch", "动态节点没有启用的点击处理器");
             if (Witnesses.Count >= MaxWitnesses)
                 return Failure("ui_index_busy", "运行态凭证过多，请使用有效凭证或稍后重新解析");
 
-            var response = (JsonValue)Respond(expected, scene.path, "runtime", backend, false);
+            var response = (JsonValue)Respond(node, handlers[0], handlers, scope, "runtime", backend, false);
             string witnessId = Guid.NewGuid().ToString("N");
-            Witnesses.Add(witnessId, new Witness { Component = expected, Path = path,
+            Witnesses.Add(witnessId, new Witness { Target = node, Handlers = handlers, Path = path,
                 SceneHandle = scene.handle, ExpiresAt = now + 120 });
             response["runtimeToken"] = witnessId;
             response["expiresInSeconds"] = 120;
             return response;
         }
 
-        private static object Respond(Component component, string scene, string binding, IIndexedClickBackend backend, bool click)
+        private static object Respond(GameObject target, Component component, Component[] handlers, string scene,
+            string binding, IIndexedClickBackend backend, bool click)
         {
             var response = JsonValue.NewObject();
             response["ok"] = true;
             response["scene"] = scene;
             response["binding"] = binding;
-            string path = NodePath.BuildPath(component.transform);
+            string path = NodePath.BuildPath(target.transform);
             response["resolvedPath"] = path;
-            response["instanceId"] = component.gameObject.GetInstanceID();
+            response["instanceId"] = target.GetInstanceID();
             response["componentType"] = component.GetType().FullName;
+            var handlerTypes = JsonValue.NewArray();
+            foreach (Component handler in handlers)
+                handlerTypes.Add(handler.GetType().FullName);
+            response["clickHandlerTypes"] = handlerTypes;
             response["liveVerified"] = true;
             if (!click)
             {
@@ -271,7 +287,7 @@ namespace Mk.UnityAgentBridge.Editor
 
             int width = Screen.width;
             int height = Screen.height;
-            InteractionOperationResult dispatched = backend.ClickIndexed(component);
+            InteractionOperationResult dispatched = backend.ClickIndexed(target, handlers);
             if (!dispatched.Ok)
             {
                 var failure = JsonValue.NewObject();
@@ -280,16 +296,15 @@ namespace Mk.UnityAgentBridge.Editor
                 failure["message"] = dispatched.ErrorMessage;
                 if (dispatched.ErrorCode == "occluded" && dispatched.RaycastHit != null)
                     failure["blockedBy"] = NodePath.BuildPath(dispatched.RaycastHit.transform);
+                if (dispatched.Events != null)
+                    failure["events"] = SerializeEvents(dispatched.Events);
                 return failure;
             }
             response["clicked"] = path;
             response["raycastHit"] = dispatched.RaycastHit != null ? NodePath.BuildPath(dispatched.RaycastHit.transform) : null;
             response["forced"] = false;
             response["clickabilityVerified"] = true;
-            var events = JsonValue.NewArray();
-            foreach (string @event in dispatched.Events)
-                events.Add(@event);
-            response["events"] = events;
+            response["events"] = SerializeEvents(dispatched.Events);
             if (dispatched.ScreenPoint is Vector2 point)
             {
                 var screen = JsonValue.NewObject();
@@ -300,6 +315,14 @@ namespace Mk.UnityAgentBridge.Editor
                 response["screenPoint"] = screen;
             }
             return response;
+        }
+
+        private static JsonValue SerializeEvents(IEnumerable<string> names)
+        {
+            var events = JsonValue.NewArray();
+            foreach (string name in names)
+                events.Add(name);
+            return events;
         }
 
         private static bool TryResolvePrefab(JsonValue body, Scene scene, bool editProof,

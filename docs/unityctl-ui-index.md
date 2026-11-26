@@ -35,6 +35,7 @@ unityctl ui-index click <ID> --root Assets/UI --scene Assets/Scenes/Demo.unity -
 
 - `--scene` 必须是已加载场景的完整资源路径。静态绑定的实例根须按名称逐层唯一匹配；不要用旧索引、相似名称或 `[0]` 猜测根。对根内的重复控件，系统核对实际槽位和来源身份，而不是取第一个。
 - Unity 2022.3 的测试场景进入 Play Mode 后会丢失 Prefab 来源链接；Edit Mode 绑定保存在当前 Editor SessionState，不写场景、不跨 Editor 重启。它把已验证的来源与场景对象身份对应，运行时再次核验两者及依赖指纹。不符合时拒绝；重新同步、绑定或只读观察，没有自动坐标降级。
-- 对**运行时动态创建**或无法证明来源的控件，先从当前 Hierarchy 获取精确路径与 instanceId。在 Play Mode 用 `ui-index resolve --scene <path> --runtime-path <path> --instance-id=<id>` 签发凭证，再用 `ui-index click --scene <path> --runtime-token <token>` 执行。凭证属于当前 Play Mode，约 120 秒过期，验证目标变更或消费后不可复用。它不是可持久化定位 ID，不写进注释、脚本或运行审计。
-- `resolve` 只核验身份，不宣称能点击；`click` 才检查当前分辨率边界、Canvas、顶层 UGUI 射线、唯一点击处理器与可交互性。返回成功只表示按预期对象派发了 `pointerClick`，不代表业务流程通过。遇到遮挡、失效或结果不明，先重新观察，不盲重试。
+- 对**运行时动态创建**或无法证明来源的控件，先从当前 Hierarchy 获取精确路径与 instanceId。在 Play Mode 用 `ui-index resolve --scene <scene> --runtime-path <path> --instance-id=<id>` 签发凭证，再用 `ui-index click --scene <scene> --runtime-token <token>` 执行。对于 Hierarchy 标为 `DontDestroyOnLoad` 的常驻控件，两条命令都使用 `--scene DontDestroyOnLoad`，不要传当前激活场景的路径。此范围仅支持动态凭证，不适用于静态 Prefab 绑定。凭证属于当前 Play Mode，约 120 秒过期，验证目标变更或消费后不可复用。它不是可持久化定位 ID，不写进注释、脚本或运行审计。
+- `resolve` 只核验身份，不宣称能点击；`click` 才检查当前分辨率边界、Canvas、顶层 UGUI 射线、响应节点与可交互性。同一节点允许多个已启用的点击处理器：`clickHandlerTypes` 列出本次核验的组件；动态凭证绑定实际组件集合，任何增删、替换或启用状态变化都会使旧凭证失效。静态定位仍须核验索引指向的组件。一次点击按 UGUI 语义派发给同一个经核验的 GameObject，不会沿层级改点其他节点。返回成功不代表业务通过；遇到遮挡、失效或结果不明，先重新观察，不盲重试。
 - Bridge 为每次收到的索引点击尝试在会话 `artifacts/interaction-actions.jsonl` 写一行审计（无会话时在既有 scratch 目录），写入异常会告警。旧版或无 UGUI 工程不会自动调用其他点击接口。
+- `click_not_dispatched` 表示没有派发 `pointerClick`，不代表没有执行其他回调。CLI 错误和点击审计中的 `events` 列出已派发的事件阶段；先核对界面或状态，不自动重试。
