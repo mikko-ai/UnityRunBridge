@@ -208,9 +208,12 @@ namespace Mk.UnityAgentBridge.Editor.Interaction
                     CopyArrayIfPresent(line, result.Json, "events");
                     CopyBooleanIfPresent(line, result.Json, "forced");
                 }
-                else if (result.Code == "occluded")
+                else
                 {
-                    CopyStringIfPresent(line, result.Json, "blockedBy");
+                    if (result.Code == "occluded")
+                        CopyStringIfPresent(line, result.Json, "blockedBy");
+                    if (action == "ui-index-click")
+                        CopyArrayIfPresent(line, result.Json, "events");
                 }
             }
             else if (action == "set-value" && result.Ok)

@@ -5,8 +5,9 @@ namespace Mk.UnityAgentBridge.Editor.Contracts
 {
     public interface IIndexedClickBackend
     {
-        Component UniqueClickHandler(GameObject target);
-        InteractionOperationResult ClickIndexed(Component expected);
+        Component[] GetActiveClickHandlers(GameObject target);
+        bool MatchesClickHandlers(GameObject target, Component[] expected);
+        InteractionOperationResult ClickIndexed(GameObject target, Component[] expected);
     }
 
     public interface IUiPrefabIndexer

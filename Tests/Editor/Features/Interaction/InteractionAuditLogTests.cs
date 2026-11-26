@@ -157,6 +157,24 @@ namespace Mk.UnityAgentBridge.Editor.Tests.Interaction
         }
 
         [Test]
+        public void AppendFromResponse_IndexedClickFailure_RecordsDispatchedStagesWithoutSuccessFields()
+        {
+            List<string> lines = CaptureLines();
+            JsonValue response = JsonParser.Parse(
+                "{\"ok\":false,\"code\":\"click_not_dispatched\",\"events\":[\"pointerDown\",\"pointerUp\"]," +
+                "\"clicked\":\"not-a-success\",\"runtimeToken\":\"do-not-copy\"}");
+
+            InteractionAuditLog.AppendFromResponse(
+                "ui-index-click", JsonValue.NewObject(), "DontDestroyOnLoad", response, 3);
+
+            JsonValue line = ParseSingleLine(lines);
+            AssertCommonLine(line, "ui-index-click", false, "click_not_dispatched");
+            Assert.AreEqual("[\"pointerDown\",\"pointerUp\"]", line["events"].ToString());
+            Assert.IsFalse(line.ContainsKey("clicked"));
+            Assert.IsFalse(line.ContainsKey("runtimeToken"));
+        }
+
+        [Test]
         public void AppendFromResponse_SetValueSuccess_CopiesTopLevelComponent()
         {
             List<string> lines = CaptureLines();

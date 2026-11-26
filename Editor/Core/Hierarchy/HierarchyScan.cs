@@ -56,11 +56,17 @@ namespace Mk.UnityAgentBridge.Editor.Hierarchy
         public static List<Transform> GetDontDestroyOnLoadRoots()
         {
             List<Transform> roots = new List<Transform>();
-            if (!Application.isPlaying)
-            {
-                return roots;
-            }
+            if (TryGetDontDestroyOnLoadScene(out Scene scene))
+                foreach (GameObject go in scene.GetRootGameObjects())
+                    roots.Add(go.transform);
+            return roots;
+        }
 
+        public static bool TryGetDontDestroyOnLoadScene(out Scene scene)
+        {
+            scene = default;
+            if (!Application.isPlaying)
+                return false;
             GameObject probe = new GameObject("~UnityAgentBridgeDdolProbe")
             {
                 hideFlags = HideFlags.HideAndDontSave
@@ -69,21 +75,13 @@ namespace Mk.UnityAgentBridge.Editor.Hierarchy
             try
             {
                 Object.DontDestroyOnLoad(probe);
-                Scene ddolScene = probe.scene;
-                foreach (GameObject go in ddolScene.GetRootGameObjects())
-                {
-                    if (go != probe)
-                    {
-                        roots.Add(go.transform);
-                    }
-                }
+                scene = probe.scene;
+                return scene.IsValid();
             }
             finally
             {
                 Object.DestroyImmediate(probe);
             }
-
-            return roots;
         }
 
         public static List<Transform> GetChildren(Transform parent)

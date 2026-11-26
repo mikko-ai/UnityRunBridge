@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Mk.UnityAgentBridge.Editor.Contracts;
 using Mk.UnityAgentBridge.Editor.Hierarchy;
@@ -15,33 +16,44 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
     {
         public InteractionOperationResult Click(GameObject target, bool force) => ClickCore(target, force, null);
 
-        public Component UniqueClickHandler(GameObject target)
+        public Component[] GetActiveClickHandlers(GameObject target)
         {
-            Component match = null;
             if (target == null || !target.activeInHierarchy)
-                return null;
+                return Array.Empty<Component>();
+            var handlers = new List<Component>();
             foreach (Component candidate in target.GetComponents<Component>())
             {
-                if (!(candidate is IPointerClickHandler) ||
-                    candidate is Behaviour behaviour && !behaviour.isActiveAndEnabled)
-                    continue;
-                if (match != null)
-                    return null;
-                match = candidate;
+                if (candidate != null && candidate is IPointerClickHandler &&
+                    (!(candidate is Behaviour behaviour) || behaviour.isActiveAndEnabled))
+                    handlers.Add(candidate);
             }
-            return match;
+            return handlers.ToArray();
         }
 
-        public InteractionOperationResult ClickIndexed(Component expected)
+        public bool MatchesClickHandlers(GameObject target, Component[] expected)
         {
-            if (expected == null || UniqueClickHandler(expected.gameObject) != expected)
-                return InteractionOperationResult.Fail("ui_index_handler_mismatch", "当前节点不能唯一匹配预期点击组件");
-            return ClickCore(expected.gameObject, false, expected);
+            if (expected == null || expected.Length == 0)
+                return false;
+            Component[] current = GetActiveClickHandlers(target);
+            if (current.Length != expected.Length)
+                return false;
+            for (int i = 0; i < current.Length; i++)
+                if (current[i] != expected[i])
+                    return false;
+            return true;
         }
 
-        private InteractionOperationResult ClickCore(GameObject target, bool force, Component expected)
+        public InteractionOperationResult ClickIndexed(GameObject target, Component[] expected)
         {
-            if (EventSystem.current == null)
+            if (!MatchesClickHandlers(target, expected))
+                return InteractionOperationResult.Fail("ui_index_handler_mismatch", "当前节点的点击处理器与已核验集合不符");
+            return ClickCore(target, false, expected);
+        }
+
+        private InteractionOperationResult ClickCore(GameObject target, bool force, Component[] expected)
+        {
+            EventSystem eventSystem = EventSystem.current;
+            if (eventSystem == null)
             {
                 return InteractionOperationResult.Fail("no_event_system", "scene 中没有可用的 EventSystem");
             }
@@ -69,10 +81,13 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 && screenPoint.y >= 0 && screenPoint.y < Screen.height))
                 return InteractionOperationResult.Fail("ui_index_offscreen", "控件中心不在当前 Game View 屏幕内");
 
+            string targetPath = expected != null ? NodePath.BuildPath(target.transform) : null;
+            int sceneHandle = expected != null ? target.scene.handle : 0;
+            int width = Screen.width, height = Screen.height;
             PointerEventData pointerData = BuildPointerEventData(screenPoint);
 
             List<RaycastResult> raycastResults = new List<RaycastResult>();
-            EventSystem.current.RaycastAll(pointerData, raycastResults);
+            eventSystem.RaycastAll(pointerData, raycastResults);
             GameObject hitObject = raycastResults.Count > 0 ? raycastResults[0].gameObject : null;
             if (raycastResults.Count > 0)
             {
@@ -132,9 +147,42 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
                 dispatchRoot = hitObject;
             }
 
-            InteractionOperationResult dispatched = DispatchClick(dispatchRoot, target, hitObject, pointerData, force, expected);
-            if (!ReferenceEquals(expected, null) && !dispatched.Events.Contains("pointerClick"))
-                return InteractionOperationResult.Fail("click_not_dispatched", "目标在派发期间改变或未收到 pointerClick，请重新观察");
+            Func<bool> verify = null;
+            if (expected != null)
+            {
+                verify = () =>
+                {
+                    if (target == null || eventSystem == null || EventSystem.current != eventSystem ||
+                        Screen.width != width || Screen.height != height || target.scene.handle != sceneHandle ||
+                        NodePath.BuildPath(target.transform) != targetPath || !MatchesClickHandlers(target, expected) ||
+                        !UguiGeometry.ComputeEffectiveInteractable(target))
+                        return false;
+                    eventSystem.RaycastAll(pointerData, raycastResults);
+                    if (raycastResults.Count == 0 || raycastResults[0].gameObject != hitObject ||
+                        hitObject == null || !IsSelfOrDescendant(hitObject.transform, target.transform) ||
+                        !(raycastResults[0].module is GraphicRaycaster))
+                        return false;
+                    var canvas = hitObject.GetComponentInParent<Canvas>();
+                    var press = ExecuteEvents.GetEventHandler<IPointerDownHandler>(hitObject);
+                    return canvas != null && canvas.rootCanvas.targetDisplay == 0 &&
+                        ExecuteEvents.GetEventHandler<IPointerClickHandler>(hitObject) == target &&
+                        (press == null || press == target);
+                };
+            }
+            if (verify != null && !verify())
+            {
+                var rejected = InteractionOperationResult.Fail("click_not_dispatched", "目标在派发前发生变化，请重新观察");
+                rejected.Events = new List<string>();
+                return rejected;
+            }
+            InteractionOperationResult dispatched = DispatchClick(dispatchRoot, target, hitObject, pointerData, force, verify);
+            if (expected != null && !dispatched.Events.Contains("pointerClick"))
+            {
+                dispatched.Ok = false;
+                dispatched.ErrorCode = "click_not_dispatched";
+                dispatched.ErrorMessage = "目标在派发期间改变或未收到 pointerClick；先检查已派发事件，不要自动重试";
+                dispatched.Clicked = null;
+            }
             return dispatched;
         }
 
@@ -177,27 +225,24 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
 
         private InteractionOperationResult DispatchClick(
             GameObject dispatchRoot, GameObject target, GameObject hitObject, PointerEventData pointerData,
-            bool force, Component expected = null)
+            bool force, Func<bool> verifyIndexed = null)
         {
             pointerData.eligibleForClick = true;
             List<string> events = new List<string>();
 
-            ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerEnterHandler);
-            events.Add("pointerEnter");
-
             // Indexed clicks never switch responders if a hover listener changes the UI.
-            bool indexed = !ReferenceEquals(expected, null);
-            var press = indexed ? ExecuteEvents.GetEventHandler<IPointerDownHandler>(dispatchRoot) : null;
-            GameObject downHandlerGo = !indexed || (target != null && expected != null
-                && UniqueClickHandler(target) == expected && (press == null || press == target))
+            bool indexed = verifyIndexed != null;
+            if (ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerEnterHandler) != null || !indexed)
+                events.Add("pointerEnter");
+            bool dispatchAllowed = !indexed || verifyIndexed();
+            GameObject downHandlerGo = dispatchAllowed
                 ? ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerDownHandler)
                 : null;
             if (downHandlerGo != null)
             {
                 events.Add("pointerDown");
             }
-            else if (!indexed || (target != null && expected != null && UniqueClickHandler(target) == expected
-                    && (press == null || press == target)))
+            else if (dispatchAllowed && (!indexed || verifyIndexed()))
             {
                 downHandlerGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(dispatchRoot);
                 if (indexed && downHandlerGo != target)
@@ -208,21 +253,20 @@ namespace Mk.UnityAgentBridge.Editor.Adapters.UGUI
 
             if (downHandlerGo != null)
             {
-                ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerUpHandler);
-                events.Add("pointerUp");
+                if (ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerUpHandler) || !indexed)
+                    events.Add("pointerUp");
 
                 GameObject clickAtUpGo = ExecuteEvents.GetEventHandler<IPointerClickHandler>(dispatchRoot);
                 if (clickAtUpGo == downHandlerGo
-                    && (!indexed || (downHandlerGo == target && expected != null
-                        && UniqueClickHandler(target) == expected && UguiGeometry.ComputeEffectiveInteractable(target)))
+                    && (!indexed || (downHandlerGo == target && verifyIndexed()))
                     && ExecuteEvents.Execute(downHandlerGo, pointerData, ExecuteEvents.pointerClickHandler))
                 {
                     events.Add("pointerClick");
                 }
             }
 
-            ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerExitHandler);
-            events.Add("pointerExit");
+            if (ExecuteEvents.ExecuteHierarchy(dispatchRoot, pointerData, ExecuteEvents.pointerExitHandler) != null || !indexed)
+                events.Add("pointerExit");
 
             return new InteractionOperationResult
             {
