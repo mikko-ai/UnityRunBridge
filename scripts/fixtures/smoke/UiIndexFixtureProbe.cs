@@ -137,11 +137,16 @@ public sealed class UiIndexFixtureProbe : MonoBehaviour
                 var coverClick = new EventTrigger.Entry { eventID = EventTriggerType.PointerClick };
                 coverClick.callback.AddListener(_ => fixture.wrongClicks++);
                 coverTrigger.triggers.Add(coverClick);
+                // Make the Graphic available to the raycaster before PointerDown.
+                // Enabling an inactive Canvas Graphic in that event can leave depth at -1 for the frame.
+                fixture.cover.GetComponent<Image>().raycastTarget = false;
+                fixture.cover.SetActive(true);
                 fixture.coverOnDown = true;
                 break;
             case "clear-down-cover":
                 fixture.coverOnDown = false;
                 fixture.cover.SetActive(false);
+                fixture.cover.GetComponent<Image>().raycastTarget = true;
                 break;
             default: throw new System.ArgumentException("Unknown fixture action");
         }
@@ -166,8 +171,7 @@ public sealed class UiIndexFixtureProbe : MonoBehaviour
         {
             if (coverOnDown)
             {
-                cover.SetActive(true);
-                Canvas.ForceUpdateCanvases();
+                cover.GetComponent<Image>().raycastTarget = true;
             }
         });
         trigger.triggers.Add(down);
